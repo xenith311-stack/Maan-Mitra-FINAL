@@ -129,10 +129,10 @@ export class SessionManager {
     } = {}
   ): Promise<string> {
     const sessionId = this.generateSessionId();
-    
+
     // Get or create therapeutic plan
     const therapeuticPlan = await this.getTherapeuticPlan(userId);
-    
+
     // Initialize session
     const session: UserSession = {
       sessionId,
@@ -151,7 +151,7 @@ export class SessionManager {
     };
 
     this.activeSessions.set(sessionId, session);
-    
+
     // Start real-time monitoring if needed
     if (sessionType === 'video' || sessionType === 'voice') {
       await this.startRealTimeMonitoring(sessionId);
@@ -521,7 +521,7 @@ export class SessionManager {
     aiResponse: any,
     emotionalAnalysis: any
   ): void {
-    session.progressMetrics.engagementLevel = Math.min(1, 
+    session.progressMetrics.engagementLevel = Math.min(1,
       session.progressMetrics.engagementLevel + 0.1
     );
 
@@ -683,7 +683,7 @@ export class SessionManager {
 
   private async generateRecommendations(session: UserSession): Promise<string[]> {
     const recommendations: string[] = [];
-    
+
     const lastEmotion = session.emotionalJourney[session.emotionalJourney.length - 1];
     if (lastEmotion && lastEmotion.intensity > 0.6) {
       recommendations.push('Continue practicing emotional regulation techniques');
@@ -706,9 +706,9 @@ export class SessionManager {
     const messages = session.interactions
       .filter(i => i.type === 'user_message')
       .map(i => i.content.toLowerCase());
-    
+
     const allText = messages.join(' ');
-    
+
     if (allText.includes('family') || allText.includes('परिवार')) {
       factors.push('family_support');
     }
@@ -718,13 +718,13 @@ export class SessionManager {
     if (allText.includes('future') || allText.includes('भविष्य')) {
       factors.push('future_orientation');
     }
-    
+
     return factors;
   }
 
   private generateImmediateActions(crisisLevel: string, _indicators: string[]): string[] {
     const actions: string[] = [];
-    
+
     if (crisisLevel === 'severe') {
       actions.push('Contact emergency services immediately');
       actions.push('Do not leave the person alone');
@@ -739,7 +739,7 @@ export class SessionManager {
       actions.push('Practice grounding techniques');
       actions.push('Connect with support person');
     }
-    
+
     return actions;
   }
 
@@ -768,19 +768,19 @@ export class SessionManager {
 
   private async generateSafetyPlan(session: UserSession, crisisLevel: string): Promise<string[]> {
     const plan: string[] = [];
-    
+
     plan.push('Recognize warning signs: ' + session.riskAssessments
       .flatMap(r => r.indicators)
       .join(', '));
-    
+
     plan.push('Use coping strategies: deep breathing, grounding techniques');
     plan.push('Contact support person when feeling overwhelmed');
     plan.push('Contact mental health professional if symptoms worsen');
-    
+
     if (crisisLevel === 'severe' || crisisLevel === 'high') {
       plan.push('Remove or secure potential means of harm');
     }
-    
+
     return plan;
   }
 
@@ -790,9 +790,9 @@ export class SessionManager {
       shortTerm: null as Date | null,
       longTerm: null as Date | null
     };
-    
+
     const now = new Date();
-    
+
     if (crisisLevel === 'severe') {
       schedule.immediate = new Date(now.getTime() + 2 * 60 * 60 * 1000);
       schedule.shortTerm = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -805,25 +805,25 @@ export class SessionManager {
       schedule.shortTerm = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
       schedule.longTerm = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     }
-    
+
     return schedule;
   }
 
   private async updateTherapeuticPlan(userId: string, session: UserSession): Promise<void> {
     const plan = await this.getTherapeuticPlan(userId);
     plan.lastUpdated = new Date();
-    
+
     session.therapeuticGoals.forEach(goal => {
       const progress = session.progressMetrics.goalProgress[goal] || 0;
       if (progress > 0.8) {
         plan.progressMilestones[goal] = true;
       }
     });
-    
+
     if (session.progressMetrics.therapeuticAlliance > 0.7) {
       plan.adaptiveStrategies.push('maintain_current_approach');
     }
-    
+
     this.userPlans.set(userId, plan);
   }
 
@@ -832,10 +832,10 @@ export class SessionManager {
     if (!this.sessionHistory.has(userId)) {
       this.sessionHistory.set(userId, []);
     }
-    
+
     const userHistory = this.sessionHistory.get(userId)!;
     userHistory.push(session);
-    
+
     if (userHistory.length > 50) {
       this.sessionHistory.set(userId, userHistory.slice(-50));
     }
@@ -853,7 +853,7 @@ export class SessionManager {
   async exportUserData(userId: string): Promise<any> {
     const sessions = this.sessionHistory.get(userId) || [];
     const plan = this.userPlans.get(userId);
-    
+
     return {
       userId,
       therapeuticPlan: plan,
@@ -876,10 +876,10 @@ export class SessionManager {
         this.activeSessions.delete(sessionId);
       }
     }
-    
+
     this.sessionHistory.delete(userId);
     this.userPlans.delete(userId);
-    
+
     console.log(`🗑️ User data deleted for ${userId}`);
   }
   // Get user progress for dashboard
@@ -903,17 +903,17 @@ export class SessionManager {
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       }
 
-      const recentSessions = sessions.filter(session => 
+      const recentSessions = sessions.filter(session =>
         session.startTime >= startDate
       );
 
       // Calculate progress metrics
       const totalSessions = recentSessions.length;
-      const avgEmotionalRegulation = recentSessions.reduce((sum, session) => 
+      const avgEmotionalRegulation = recentSessions.reduce((sum, session) =>
         sum + (session.progressMetrics?.emotionalRegulation || 0), 0) / Math.max(totalSessions, 1);
-      const avgSelfAwareness = recentSessions.reduce((sum, session) => 
+      const avgSelfAwareness = recentSessions.reduce((sum, session) =>
         sum + (session.progressMetrics?.selfAwareness || 0), 0) / Math.max(totalSessions, 1);
-      const avgCopingSkills = recentSessions.reduce((sum, session) => 
+      const avgCopingSkills = recentSessions.reduce((sum, session) =>
         sum + (session.progressMetrics?.copingSkillsUsage || 0), 0) / Math.max(totalSessions, 1);
 
       return {
@@ -984,7 +984,7 @@ export class SessionManager {
 
   private calculateStreak(sessions: UserSession[]): number {
     if (sessions.length === 0) return 0;
-    
+
     const sortedSessions = sessions.sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
     let streak = 0;
     let currentDate = new Date();
@@ -993,51 +993,51 @@ export class SessionManager {
     for (const session of sortedSessions) {
       const sessionDate = new Date(session.startTime);
       sessionDate.setHours(0, 0, 0, 0);
-      
+
       const daysDiff = Math.floor((currentDate.getTime() - sessionDate.getTime()) / (1000 * 60 * 60 * 24));
-      
+
       if (daysDiff === streak) {
         streak++;
       } else if (daysDiff > streak) {
         break;
       }
     }
-    
+
     return streak;
   }
 
   private calculateImprovements(sessions: UserSession[]): string[] {
     const improvements: string[] = [];
-    
+
     if (sessions.length >= 2) {
       const recent = sessions.slice(-5);
       const older = sessions.slice(0, -5);
-      
+
       if (older.length > 0) {
         const recentAvg = recent.reduce((sum, s) => sum + (s.progressMetrics?.emotionalRegulation || 0), 0) / recent.length;
         const olderAvg = older.reduce((sum, s) => sum + (s.progressMetrics?.emotionalRegulation || 0), 0) / older.length;
-        
+
         if (recentAvg > olderAvg + 0.1) {
           improvements.push('Improved emotional regulation');
         }
       }
     }
-    
+
     return improvements;
   }
 
   private identifyChallenges(sessions: UserSession[]): string[] {
     const challenges: string[] = [];
-    
+
     // Identify patterns that suggest challenges
-    const highStressSessions = sessions.filter(s => 
+    const highStressSessions = sessions.filter(s =>
       s.emotionalJourney.some(e => e.primaryEmotion === 'stress' && e.intensity > 0.7)
     );
-    
+
     if (highStressSessions.length > sessions.length * 0.3) {
       challenges.push('Managing stress levels');
     }
-    
+
     return challenges;
   }
 
@@ -1054,13 +1054,13 @@ export class SessionManager {
     // Calculate emotional trends from session data
     const emotions = sessions.flatMap(s => s.emotionalJourney || []);
     const emotionCounts: { [key: string]: number } = {};
-    
+
     emotions.forEach(emotion => {
       emotionCounts[emotion.primaryEmotion] = (emotionCounts[emotion.primaryEmotion] || 0) + 1;
     });
 
     const dominantEmotions = Object.entries(emotionCounts)
-      .sort(([,a], [,b]) => b - a)
+      .sort(([, a], [, b]) => b - a)
       .slice(0, 3)
       .map(([emotion]) => emotion);
 
@@ -1080,20 +1080,20 @@ export class SessionManager {
 
   private identifyRiskFactors(sessions: UserSession[]): string[] {
     const riskFactors: string[] = [];
-    
+
     // Analyze sessions for risk patterns
-    const highRiskSessions = sessions.filter(s => 
+    const highRiskSessions = sessions.filter(s =>
       s.riskAssessments?.some(r => r.level === 'high' || r.level === 'severe')
     );
-    
+
     if (highRiskSessions.length > 0) {
       riskFactors.push('Recent high-risk episodes');
     }
-    
+
     const stressSessions = sessions.filter(s =>
       s.emotionalJourney?.some(e => e.primaryEmotion === 'stress' && e.intensity > 0.7)
     );
-    
+
     if (stressSessions.length > sessions.length * 0.3) {
       riskFactors.push('Persistent stress levels');
     }
@@ -1108,7 +1108,7 @@ export class SessionManager {
 
     const goals = sessions.flatMap(s => s.therapeuticGoals || []);
     const uniqueGoals = [...new Set(goals)];
-    
+
     return uniqueGoals.length > 0 ? uniqueGoals.slice(0, 3) : ['Emotional regulation', 'Stress management'];
   }
 
@@ -1124,16 +1124,16 @@ export class SessionManager {
 
     const totalInteractions = sessions.reduce((sum, s) => sum + (s.interactions?.length || 0), 0);
     const avgSessionLength = sessions.reduce((sum, s) => sum + s.duration, 0) / sessions.length;
-    
+
     // Find most common interaction type
     const interactionTypes = sessions.map(s => s.sessionType);
     const typeCounts: { [key: string]: number } = {};
     interactionTypes.forEach(type => {
       typeCounts[type] = (typeCounts[type] || 0) + 1;
     });
-    
+
     const preferredType = Object.entries(typeCounts)
-      .sort(([,a], [,b]) => b - a)[0]?.[0] || 'chat';
+      .sort(([, a], [, b]) => b - a)[0]?.[0] || 'chat';
 
     return {
       totalInteractions,
@@ -1149,11 +1149,11 @@ export class SessionManager {
     }
 
     const goalProgress: { [key: string]: any } = {};
-    
+
     // Common therapeutic goals
     const commonGoals = [
       'Emotional Regulation',
-      'Stress Management', 
+      'Stress Management',
       'Sleep Quality',
       'Social Connection',
       'Self-Awareness'
@@ -1163,7 +1163,7 @@ export class SessionManager {
       // Calculate progress based on session data
       let progress = 0;
       let status = 'In Progress';
-      
+
       // Simple progress calculation based on session count and emotional trends
       if (sessions.length > 5) {
         progress = Math.min(sessions.length * 10, 80) + Math.random() * 20;

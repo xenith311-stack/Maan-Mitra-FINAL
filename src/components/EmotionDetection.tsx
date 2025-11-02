@@ -1,8 +1,16 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
-import { Camera, CameraOff, Download, Eye } from 'lucide-react';
+import { Camera, CameraOff, Download, Eye, Activity } from 'lucide-react';
 import { emotionDetection, type EmotionDetectionResult } from '../services/emotionDetection';
+import { toast } from 'sonner';
+
+// --- Firestore Imports ---
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { db, firebaseService } from '../services/firebaseService';
+
+// --- Auth Hook Import ---
+import { useAuth } from './auth/AuthProvider';
 
 interface EmotionSession {
   id: string;
@@ -18,10 +26,16 @@ export default function EmotionDetection() {
   const [currentSession, setCurrentSession] = useState<EmotionSession | null>(null);
   const [sessionTime, setSessionTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // --- Get Current User ---
+  const { currentUser } = useAuth();
+
+  // *** REMOVED canvasRef ***
+  // The emotionDetection service now handles its own canvas logic internally.
 
   // Timer for session tracking
   useEffect(() => {
@@ -34,11 +48,34 @@ export default function EmotionDetection() {
     return () => clearInterval(interval);
   }, [isActive, currentSession]);
 
+  // --- Callback handler for emotion updates ---
+  // Using useCallback ensures the function reference is stable
+  const handleEmotionUpdate = useCallback((result: EmotionDetectionResult) => {
+    setCurrentResult(result);
+
+    // Add to current session
+    // Use functional state update to avoid stale 'currentSession'
+    setCurrentSession(prevSession => {
+      if (!prevSession) return null;
+      return {
+        ...prevSession,
+        results: [...prevSession.results, result]
+      };
+    });
+  }, []); // Empty dependency array is correct here
+
+  // --- FIXED startDetection Function ---
   const startDetection = async () => {
+    // Ensure video element exists before starting
+    if (!videoRef.current) {
+      setError("Video element is not ready. Please try again.");
+      return;
+    }
+
     try {
       setError(null);
-      
-      // Request camera access
+
+      // Request camera access (this is fine)
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 640 },
@@ -63,30 +100,27 @@ export default function EmotionDetection() {
       setSessionTime(0);
       setIsActive(true);
 
-      // Start emotion detection
+      // *** --- KEY FIX --- ***
+      // You must pass videoRef.current as the FIRST argument,
+      // as defined in the service.
       await emotionDetection.startRealTimeAnalysis(
-        (result: EmotionDetectionResult) => {
-          setCurrentResult(result);
-          
-          // Add to current session
-          if (currentSession) {
-            const updatedSession = {
-              ...currentSession,
-              results: [...currentSession.results, result]
-            };
-            setCurrentSession(updatedSession);
-          }
-        },
+        videoRef.current, // 1. The video element
+        handleEmotionUpdate, // 2. The callback
         {
-          interval: 2000, // Analyze every 2 seconds
-          culturalContext: 'indian',
-          sensitivity: 'medium'
+          interval: 2000, // 3. The options
         }
       );
 
     } catch (error) {
       console.error('Camera access error:', error);
-      setError('Failed to access camera. Please ensure camera permissions are enabled.');
+
+      // *** FIX: Handle 'unknown' error type ***
+      let errorMessage = 'Failed to access camera. Please ensure permissions are enabled.';
+      if (error instanceof Error) {
+        errorMessage = `Camera failed: ${error.message}`;
+      }
+      setError(errorMessage);
+      toast.error(errorMessage); // Show toast notification
       setIsActive(false);
     }
   };
@@ -116,44 +150,76 @@ export default function EmotionDetection() {
     setSessionTime(0);
   };
 
+  // --- MODIFIED captureSnapshot Function ---
   const captureSnapshot = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
+    if (!videoRef.current || !isActive) {
+      toast.info('Please start the camera first.');
+      return;
+    }
 
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    const ctx = canvas.getContext('2d');
+    if (!currentUser) { // Check if user is logged in
+      toast.error('You must be logged in to save snapshots.');
+      return;
+    }
 
-    if (!ctx) return;
+    setIsAnalyzing(true);
+    toast.info('Getting high-accuracy analysis...');
 
-    // Set canvas size to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    try {
+      const result = await emotionDetection.analyzeSnapshot(videoRef.current);
+      handleEmotionUpdate(result); // Update UI
+      toast.success(`Cloud Analysis: ${result.primaryEmotion} (${Math.round(result.confidence * 100)}%)`);
 
-    // Draw current video frame
-    ctx.drawImage(video, 0, 0);
-
-    // Convert to blob and analyze
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-
+      // --- Add to Firestore ---
       try {
-        const result = await emotionDetection.analyzeImage(blob);
-        setCurrentResult(result);
+        const snapshotData = {
+          userId: currentUser.uid, // Link to the user
+          timestamp: serverTimestamp(), // Use server time
+          primaryEmotion: result.primaryEmotion,
+          confidence: result.confidence,
+          emotions: result.emotions, // Save the detailed emotion map
+          wellnessIndicators: result.wellnessIndicators, // Save wellness map
+          source: 'cloud_vision_snapshot' // Indicate the source
+        };
 
-        // Add to session if active
-        if (currentSession) {
-          const updatedSession = {
-            ...currentSession,
-            results: [...currentSession.results, result]
-          };
-          setCurrentSession(updatedSession);
+        const docRef = await addDoc(collection(db, "emotionSnapshots"), snapshotData);
+        console.log("Snapshot saved to Firestore with ID: ", docRef.id);
+        toast.success("Snapshot analysis saved.");
+
+        // --- NEW: Log this activity ---
+        try {
+          await firebaseService.logUserActivity(
+            currentUser.uid,
+            'used_emotion_detection',
+            { 
+              primaryEmotion: result.primaryEmotion,
+              confidence: result.confidence,
+              source: 'cloud_vision_snapshot'
+            }
+          );
+        } catch (activityError) {
+          console.warn('Failed to log emotion detection activity:', activityError);
         }
-      } catch (error) {
-        console.error('Snapshot analysis error:', error);
-        setError('Failed to analyze snapshot. Please try again.');
+        // --- END NEW ---
+      } catch (firestoreError) {
+        console.error("Error saving snapshot to Firestore:", firestoreError);
+        toast.error("Failed to save snapshot data.");
       }
-    }, 'image/jpeg', 0.8);
+      // ----------------------
+
+    } catch (error) {
+      console.error('Snapshot analysis error:', error);
+      let errorMessage = 'Failed to analyze snapshot. Please try again.';
+      if (error instanceof Error) {
+        errorMessage = `Snapshot failed: ${error.message}`;
+      }
+      setError(errorMessage);
+      toast.error(errorMessage);
+    }
+    setIsAnalyzing(false);
   };
+
+  // --- (All other functions below are unchanged) ---
 
   const downloadResults = () => {
     if (!currentSession) return;
@@ -214,16 +280,17 @@ export default function EmotionDetection() {
       anger: 'text-red-600 bg-red-100',
       fear: 'text-purple-600 bg-purple-100',
       surprise: 'text-green-600 bg-green-100',
-      disgust: 'text-gray-600 bg-gray-100'
+      disgust: 'text-gray-600 bg-gray-100',
+      neutral: 'text-gray-600 bg-gray-100',
     };
     return colors[emotion as keyof typeof colors] || 'text-gray-600 bg-gray-100';
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Emotion Detection</h1>
-        <p className="text-gray-600">
+    <div className="p-4 md:p-6 max-w-6xl mx-auto">
+      <div className="mb-4 md:mb-6">
+        <h1 className="text-xl md:text-2xl font-bold text-gray-900 mb-2">Emotion Detection</h1>
+        <p className="text-sm md:text-base text-gray-600">
           Real-time facial emotion analysis for mental health assessment and self-awareness
         </p>
       </div>
@@ -234,14 +301,14 @@ export default function EmotionDetection() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* Camera Feed */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Camera Feed</h2>
+        <Card className="p-4 md:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 space-y-2 sm:space-y-0">
+            <h2 className="text-base md:text-lg font-semibold text-gray-900">Camera Feed</h2>
             <div className="flex items-center gap-2">
               {isActive && (
-                <span className="text-sm text-gray-600">
+                <span className="text-xs md:text-sm text-gray-600">
                   {formatTime(sessionTime)}
                 </span>
               )}
@@ -250,6 +317,10 @@ export default function EmotionDetection() {
           </div>
 
           <div className="relative bg-gray-100 rounded-lg overflow-hidden mb-4" style={{ aspectRatio: '4/3' }}>
+            {/* This video element is now always rendered, but hidden.
+              This ensures videoRef.current is always available.
+              The 'isActive' check will hide the parent div if not active.
+            */}
             <video
               ref={videoRef}
               autoPlay
@@ -267,7 +338,9 @@ export default function EmotionDetection() {
             )}
           </div>
 
-          <canvas ref={canvasRef} className="hidden" />
+          {/* The canvasRef is no longer needed here, as the service handles it.
+            <canvas ref={canvasRef} className="hidden" /> 
+          */}
 
           <div className="flex items-center gap-3">
             <Button
@@ -278,12 +351,14 @@ export default function EmotionDetection() {
               {isActive ? 'Stop Detection' : 'Start Detection'}
             </Button>
 
-            {isActive && (
-              <Button variant="outline" onClick={captureSnapshot}>
-                <Eye className="w-4 h-4 mr-2" />
-                Analyze Now
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              onClick={captureSnapshot}
+              disabled={!isActive || isAnalyzing}
+            >
+              {isAnalyzing ? <Activity className="w-4 h-4 mr-2 animate-spin" /> : <Eye className="w-4 h-4 mr-2" />}
+              Analyze Now
+            </Button>
 
             {currentSession && currentSession.results.length > 0 && (
               <Button variant="outline" onClick={downloadResults}>
@@ -297,7 +372,7 @@ export default function EmotionDetection() {
         {/* Current Analysis */}
         <Card className="p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Current Analysis</h2>
-          
+
           {currentResult ? (
             <div className="space-y-4">
               {/* Primary Emotion */}
@@ -359,18 +434,119 @@ export default function EmotionDetection() {
                 </div>
               </div>
 
+              {/* Enhanced Facial Features Analysis */}
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 mb-2">Facial Analysis</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-600">Eye Contact</span>
+                      <span className={`text-xs px-2 py-1 rounded-full ${currentResult.facialFeatures.eyeContact ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {currentResult.facialFeatures.eyeContact ? '👁️ Present' : '👁️ Limited'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-600">Facial Tension</span>
+                      <span className="text-xs font-semibold text-gray-700">
+                        {Math.round(currentResult.facialFeatures.facialTension * 100)}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full transition-all duration-300 ${currentResult.facialFeatures.facialTension > 0.7 ? 'bg-red-500' :
+                            currentResult.facialFeatures.facialTension > 0.4 ? 'bg-yellow-500' : 'bg-green-500'
+                          }`}
+                        style={{ width: `${currentResult.facialFeatures.facialTension * 100}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Micro-expressions */}
+                {currentResult.facialFeatures.microExpressions.length > 0 && (
+                  <div className="mt-3">
+                    <span className="text-xs text-gray-600 block mb-2">Micro-expressions detected:</span>
+                    <div className="flex flex-wrap gap-1">
+                      {currentResult.facialFeatures.microExpressions.map((expression, index) => (
+                        <span key={index} className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded-full border border-blue-200">
+                          {expression}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Enhanced Wellness Visualization */}
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 mb-2">Wellness Dashboard</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-2 bg-gradient-to-r from-red-50 to-red-100 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">😰</span>
+                      <span className="text-sm font-medium text-red-800">Stress Level</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-bold text-red-700">
+                        {Math.round(currentResult.wellnessIndicators.stressLevel * 100)}%
+                      </div>
+                      <div className="text-xs text-red-600">
+                        {currentResult.wellnessIndicators.stressLevel > 0.7 ? 'High' :
+                          currentResult.wellnessIndicators.stressLevel > 0.4 ? 'Moderate' : 'Low'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 bg-gradient-to-r from-green-50 to-green-100 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">⚡</span>
+                      <span className="text-sm font-medium text-green-800">Energy Level</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-bold text-green-700">
+                        {Math.round((1 - currentResult.wellnessIndicators.fatigueLevel) * 100)}%
+                      </div>
+                      <div className="text-xs text-green-600">
+                        {(1 - currentResult.wellnessIndicators.fatigueLevel) > 0.7 ? 'High' :
+                          (1 - currentResult.wellnessIndicators.fatigueLevel) > 0.4 ? 'Moderate' : 'Low'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🎯</span>
+                      <span className="text-sm font-medium text-blue-800">Engagement</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-bold text-blue-700">
+                        {Math.round(currentResult.wellnessIndicators.engagementLevel * 100)}%
+                      </div>
+                      <div className="text-xs text-blue-600">
+                        {currentResult.wellnessIndicators.engagementLevel > 0.7 ? 'High' :
+                          currentResult.wellnessIndicators.engagementLevel > 0.4 ? 'Moderate' : 'Low'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Recommendations */}
               {currentResult.recommendations.immediate.length > 0 && (
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Immediate Recommendations</h3>
-                  <ul className="space-y-1">
-                    {currentResult.recommendations.immediate.map((rec, index) => (
-                      <li key={index} className="text-sm text-gray-600 flex items-start gap-2">
-                        <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                        {rec}
-                      </li>
-                    ))}
-                  </ul>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">💡 Personalized Recommendations</h3>
+                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-3 border border-green-200">
+                    <ul className="space-y-2">
+                      {currentResult.recommendations.immediate.map((rec, index) => (
+                        <li key={index} className="text-sm text-green-800 flex items-start gap-2">
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
+                          {rec}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               )}
             </div>

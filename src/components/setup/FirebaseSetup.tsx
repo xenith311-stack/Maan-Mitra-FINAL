@@ -4,6 +4,19 @@ import { firebaseService } from '../../services/firebaseService';
 import { toast } from 'sonner';
 import { Database, AlertCircle, Play } from 'lucide-react';
 import { QuickSetup } from './QuickSetup';
+type MoodEntry = {
+  userId: string;
+  mood: number;
+  energy: number;
+  anxiety: number;
+  sleep: number;
+  notes: string;
+  activities: string[];
+  triggers: string[];
+  location: string;
+  createdAt: Date;
+};
+
 
 export const FirebaseSetup: React.FC = () => {
   const { currentUser } = useAuth();
@@ -51,7 +64,7 @@ export const FirebaseSetup: React.FC = () => {
 
       // 2. Create Mood Entries
       addResult('Creating mood tracking data...');
-      const moodEntries = [];
+      const moodEntries: MoodEntry[] = [];
       for (let i = 7; i >= 0; i--) {
         const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
         const mood = Math.floor(Math.random() * 4) + 6; // 6-10 range

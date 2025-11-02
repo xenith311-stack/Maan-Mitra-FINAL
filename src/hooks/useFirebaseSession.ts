@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../components/auth/AuthProvider';
-import { firebaseService, SessionData } from '../services/firebaseService';
+import { firebaseService, SessionData, SessionInteraction, SessionEmotion, SessionRiskAssessment } from '../services/firebaseService';
 
 interface UseFirebaseSessionReturn {
   currentSession: SessionData | null;
@@ -8,19 +8,8 @@ interface UseFirebaseSessionReturn {
   startSession: (sessionType: SessionData['sessionType']) => Promise<string>;
   endSession: () => Promise<void>;
   updateSession: (updates: Partial<SessionData>) => Promise<void>;
-  addInteraction: (interaction: {
-    type: 'user_message' | 'ai_response' | 'emotion_detected' | 'voice_analysis';
-    content: string;
-    metadata?: any;
-  }) => Promise<void>;
-  addEmotionalDataPoint: (emotion: {
-    primaryEmotion: string;
-    intensity: number;
-    valence: number;
-    arousal: number;
-    confidence: number;
-    source: 'text' | 'voice' | 'facial';
-  }) => Promise<void>;
+  addInteraction: (interaction: Omit<SessionInteraction, 'timestamp'>) => Promise<void>;
+  addEmotionalDataPoint: (emotion: Omit<SessionEmotion, 'timestamp'>) => Promise<void>;
   recordCrisisEvent: (event: {
     severity: 'moderate' | 'high' | 'severe';
     triggerMessage: string;
@@ -54,8 +43,6 @@ export const useFirebaseSession = (): UseFirebaseSessionReturn => {
         startTime: new Date(),
         duration: 0,
         sessionType,
-        interactions: [],
-        emotionalJourney: [],
         progressMetrics: {
           emotionalRegulation: 0.5,
           selfAwareness: 0.5,
@@ -63,7 +50,6 @@ export const useFirebaseSession = (): UseFirebaseSessionReturn => {
           therapeuticAlliance: 0.5,
           engagementLevel: 0.5
         },
-        riskAssessments: [],
         outcomes: {
           overallMood: 'stable' as const,
           goalsAddressed: [],
@@ -100,11 +86,7 @@ export const useFirebaseSession = (): UseFirebaseSessionReturn => {
     setError(null);
 
     try {
-      const duration = Date.now() - currentSession.startTime.getTime();
-      
       await firebaseService.endSession(currentSession.sessionId, {
-        duration,
-        endTime: new Date(),
         outcomes: {
           overallMood: 'stable',
           goalsAddressed: currentSession.outcomes.goalsAddressed,
@@ -144,73 +126,39 @@ export const useFirebaseSession = (): UseFirebaseSessionReturn => {
   }, [currentSession]);
 
   // Add interaction to current session
-  const addInteraction = useCallback(async (interaction: {
-    type: 'user_message' | 'ai_response' | 'emotion_detected' | 'voice_analysis';
-    content: string;
-    metadata?: any;
-  }): Promise<void> => {
+  const addInteraction = useCallback(async (interaction: Omit<SessionInteraction, 'timestamp'>): Promise<void> => {
     if (!currentSession) {
       throw new Error('No active session');
     }
 
-    const newInteraction = {
-      timestamp: new Date(),
-      ...interaction,
-      metadata: interaction.metadata ?? {}
-    };
+    setError(null);
 
     try {
-      const updatedInteractions = [...currentSession.interactions, newInteraction];
-      
-      await firebaseService.updateSession(currentSession.sessionId, {
-        interactions: updatedInteractions
-      });
-
-      // Update local state
-      setCurrentSession(prev => prev ? {
-        ...prev,
-        interactions: updatedInteractions
-      } : null);
-      
+      // Call the new service function to add to subcollection
+      await firebaseService.addInteractionToSubcollection(currentSession.sessionId, interaction);
+      // No need to update local state's interactions array anymore
     } catch (err: any) {
       setError(err.message);
+      console.error("useFirebaseSession: Error adding interaction:", err);
       throw err;
     }
   }, [currentSession]);
 
   // Add emotional data point
-  const addEmotionalDataPoint = useCallback(async (emotion: {
-    primaryEmotion: string;
-    intensity: number;
-    valence: number;
-    arousal: number;
-    confidence: number;
-    source: 'text' | 'voice' | 'facial';
-  }): Promise<void> => {
+  const addEmotionalDataPoint = useCallback(async (emotion: Omit<SessionEmotion, 'timestamp'>): Promise<void> => {
     if (!currentSession) {
       throw new Error('No active session');
     }
 
-    const emotionalDataPoint = {
-      timestamp: new Date(),
-      ...emotion
-    };
+    setError(null);
 
     try {
-      const updatedJourney = [...currentSession.emotionalJourney, emotionalDataPoint];
-      
-      await firebaseService.updateSession(currentSession.sessionId, {
-        emotionalJourney: updatedJourney
-      });
-
-      // Update local state
-      setCurrentSession(prev => prev ? {
-        ...prev,
-        emotionalJourney: updatedJourney
-      } : null);
-      
+      // Call the new service function
+      await firebaseService.addEmotionToSubcollection(currentSession.sessionId, emotion);
+      // No need to update local state's emotionalJourney array anymore
     } catch (err: any) {
       setError(err.message);
+      console.error("useFirebaseSession: Error adding emotion:", err);
       throw err;
     }
   }, [currentSession]);
@@ -225,7 +173,10 @@ export const useFirebaseSession = (): UseFirebaseSessionReturn => {
       throw new Error('User not authenticated');
     }
 
+    setError(null);
+
     try {
+      // Record in separate crisisEvents collection (keep this)
       await firebaseService.recordCrisisEvent({
         userId: currentUser.uid,
         timestamp: new Date(),
@@ -238,31 +189,21 @@ export const useFirebaseSession = (): UseFirebaseSessionReturn => {
         resolution: 'pending'
       });
 
-      // Add risk assessment to current session if active
+      // Add simplified risk assessment point to CURRENT session's subcollection
       if (currentSession) {
-        const riskAssessment = {
-          timestamp: new Date(),
-          level: event.severity as 'moderate' | 'high' | 'severe',
+        const riskAssessmentPoint: Omit<SessionRiskAssessment, 'timestamp'> = {
+          level: event.severity,
           indicators: event.detectedIndicators,
-          interventions: [],
-          followUpRequired: true,
-          professionalReferral: event.severity === 'severe'
+          interventions: [] // Add interventions if applicable later
         };
 
-        const updatedRiskAssessments = [...currentSession.riskAssessments, riskAssessment];
-        
-        await firebaseService.updateSession(currentSession.sessionId, {
-          riskAssessments: updatedRiskAssessments
-        });
-
-        setCurrentSession(prev => prev ? {
-          ...prev,
-          riskAssessments: updatedRiskAssessments
-        } : null);
+        await firebaseService.addRiskAssessmentToSubcollection(currentSession.sessionId, riskAssessmentPoint);
+        // No need to update local state's riskAssessments array anymore
       }
       
     } catch (err: any) {
       setError(err.message);
+      console.error("useFirebaseSession: Error recording crisis event:", err);
       throw err;
     }
   }, [currentUser, currentSession]);

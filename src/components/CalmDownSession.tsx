@@ -11,8 +11,11 @@ import {
   Volume2,
   VolumeX,
   ChevronRight,
+  Loader2, // *** NEW ***
 } from 'lucide-react';
 import type { Screen } from '../types';
+import { useAuth } from './auth/AuthProvider'; // *** NEW *** (Adjust path if needed)
+import { firebaseService, JournalEntry } from '../services/firebaseService'; // *** NEW *** (Adjust path if needed)
 
 interface CalmDownSessionProps {
   navigateTo: (screen: Screen) => void;
@@ -30,22 +33,21 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const [isSaving, setIsSaving] = useState(false); // *** NEW ***
+  const { currentUser } = useAuth(); // *** NEW ***
+
   // Function to properly stop and cleanup audio
   const stopAndCleanupAudio = useCallback(() => {
     try {
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
-        audioRef.current.src = '';
-        audioRef.current.load();
-        audioRef.current = null;
       }
     } catch (error) {
       console.log('Error cleaning up audio:', error);
     }
     setIsAudioPlaying(false);
   }, []);
-
 
   // Public-domain/royalty-free ambience loops
   // Fallback-safe: if a URL fails, playback is silently ignored
@@ -67,20 +69,6 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
     ocean: new URL('../assets/sounds/ocean.mp3', import.meta.url).href,
     birds: new URL('../assets/sounds/birds.mp3', import.meta.url).href,
   };
-
-  // Alternative local paths for better compatibility
-  const alternativeLocalUrls: Record<string, string> = {
-    rain: '/src/assets/sounds/rain.mp3',
-    forest: '/src/assets/sounds/forest.mp3',
-    ocean: '/src/assets/sounds/ocean.mp3',
-    birds: '/src/assets/sounds/birds.mp3',
-  };
-
-  // const breathingCycle = {
-  //   inhale: 4,
-  //   hold: 4,
-  //   exhale: 6,
-  // };
 
   const steps = [
     {
@@ -146,70 +134,66 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
     }
   }, [timeLeft]);
 
-  // Handle soundscape playback - simplified approach
+  // Handle soundscape playback
   useEffect(() => {
-    console.log('Audio effect triggered - currentStep:', currentStep, 'soundEnabled:', soundEnabled, 'selectedSoundscape:', selectedSoundscape);
-    
-    // Always stop current audio first
-    stopAndCleanupAudio();
-
-    // Only create audio during Soundscape step and if enabled
-    if (currentStep === 3 && soundEnabled) {
-      const primaryUrl = localSoundUrls[selectedSoundscape];
-      const fallbackUrl = remoteSoundUrls[selectedSoundscape];
-      
+    // 1. Create the audio element ONCE if it doesn't exist
+    if (!audioRef.current) {
       const audio = new Audio();
       audio.loop = true;
-      audio.volume = 0.3; // Reduced volume to prevent distortion
+      audio.volume = 0.3;
       audio.preload = 'auto';
-      
-      // Set up event listeners
-      audio.addEventListener('canplaythrough', () => {
-        console.log('Audio loaded successfully');
-        // Don't auto-play, wait for user interaction
-        setIsAudioPlaying(false);
-      });
 
-      audio.addEventListener('play', () => {
-        console.log('Audio play event triggered');
-        setIsAudioPlaying(true);
-      });
-      
-      audio.addEventListener('pause', () => {
-        console.log('Audio pause event triggered');
-        setIsAudioPlaying(false);
-      });
-      
-      audio.addEventListener('ended', () => {
-        console.log('Audio ended event triggered');
-        setIsAudioPlaying(false);
-      });
-
+      audio.addEventListener('play', () => setIsAudioPlaying(true));
+      audio.addEventListener('pause', () => setIsAudioPlaying(false));
+      audio.addEventListener('ended', () => setIsAudioPlaying(false));
+      audio.addEventListener('canplaythrough', () => console.log('Audio loaded'));
       audio.addEventListener('error', (e) => {
-        console.log('Audio error, trying fallback:', e);
-        if (fallbackUrl && audio.src !== fallbackUrl) {
-          audio.src = fallbackUrl;
-          audio.load();
-        } else {
-          setIsAudioPlaying(false);
+        console.log('Audio error event:', e);
+        const currentSrc = audioRef.current?.src;
+        const fallbackUrl = remoteSoundUrls[selectedSoundscape];
+
+        if (fallbackUrl && currentSrc !== fallbackUrl) {
+          if (audioRef.current) {
+            audioRef.current.src = fallbackUrl;
+            audioRef.current.load();
+          }
         }
       });
-
-      // Try primary URL first
-      audio.src = primaryUrl;
-      audio.load();
       audioRef.current = audio;
     }
 
-    return () => {
-      stopAndCleanupAudio();
-    };
-  }, [currentStep, selectedSoundscape, soundEnabled, stopAndCleanupAudio]);
+    // 2. Now, manage the state of the audio element
+    const audio = audioRef.current;
+    const shouldBePlaying = (currentStep === 3 && soundEnabled);
 
-  // Cleanup audio when component unmounts
+    if (shouldBePlaying) {
+      const primaryUrl = localSoundUrls[selectedSoundscape];
+      const fallbackUrl = remoteSoundUrls[selectedSoundscape];
+      const targetUrl = primaryUrl || fallbackUrl || '';
+
+      // 3. Only change the source if it's different
+      if (audio.src !== primaryUrl && audio.src !== fallbackUrl) {
+        audio.pause();
+        setIsAudioPlaying(false);
+        audio.src = targetUrl;
+        audio.load();
+      }
+    } else {
+      // 4. We are not on the soundscape step or sound is disabled
+      if (!audio.paused) {
+        audio.pause();
+      }
+    }
+  }, [currentStep, selectedSoundscape, soundEnabled, localSoundUrls, remoteSoundUrls]);
+
+  // Cleanup audio ONLY when component unmounts
   useEffect(() => {
+    const audio = audioRef.current; // Capture ref
     return () => {
-      stopAndCleanupAudio();
+      if (audio) {
+        audio.pause();
+        audio.src = '';
+      }
     };
   }, []);
 
@@ -234,12 +218,57 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
     setPhase('inhale');
   };
 
-  const handleNextStep = () => {
+  // *** NEW ***: Function to save the journal entry
+  const handleSaveJournal = async () => {
+    if (isSaving) return;
+    if (!currentUser) {
+      console.error('User not logged in, cannot save journal entry.');
+      return;
+    }
+    if (journalText.trim() === '') {
+      console.log('No journal text to save.');
+      return;
+    }
+
+    setIsSaving(true);
+
+    // Construct the new journal entry
+    const newEntry: Omit<JournalEntry, 'entryId' | 'createdAt' | 'updatedAt'> = {
+      userId: currentUser.uid,
+      title: 'Calm Down Session Journal', // Label: Title
+      content: journalText.trim(),
+      mood: 'neutral', // Default mood, as it's not explicitly asked
+      emotions: [], // Default emotions
+      tags: ['calm-down-session', 'guided-exercise'], // Label: Tags
+      isPrivate: true, // Default to private
+      // createdAt and updatedAt will be set by serverTimestamp in firebaseService
+      // aiInsights is optional
+    };
+
+    try {
+      // We pass an object that matches Omit<JournalEntry, 'entryId'>
+      // Our createJournalEntry function handles createdAt/updatedAt
+      await firebaseService.createJournalEntry(newEntry as Omit<JournalEntry, 'entryId'>);
+      console.log('Calm down session journal saved successfully.');
+    } catch (error) {
+      console.error('Failed to save journal entry:', error);
+      // You could show a toast notification here
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleNextStep = async () => { // *** MODIFIED ***: Made async
     // Stop audio when leaving the soundscape step
     if (currentStep === 3) {
       stopAndCleanupAudio();
     }
-    
+
+    // *** NEW ***: Save journal when moving *from* the journaling step
+    if (currentStep === 2) {
+      await handleSaveJournal();
+    }
+
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
       if (currentStep === 0) {
@@ -249,6 +278,14 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
       // Session complete
       navigateTo('home');
     }
+  };
+  
+  // *** NEW ***: Handle exit logic to also save journal
+  const handleExit = async () => {
+    if (currentStep === 2) {
+      await handleSaveJournal();
+    }
+    navigateTo('home');
   };
 
   const getPhaseInstruction = () => {
@@ -267,6 +304,7 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
       case 0: // Breathing
         return (
           <div className="text-center">
+            {/* ... (breathing content unchanged) ... */}
             <div className="mb-8 flex justify-center">
               <div
                 className={`w-36 h-36 rounded-full bg-white/60 ring-4 ring-white/80 shadow-[0_0_30px_rgba(255,255,255,0.45)] drop-shadow-[0_0_12px_rgba(255,255,255,0.35)] flex items-center justify-center transition-transform duration-700 ${
@@ -331,6 +369,7 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
       case 1: // Grounding
         return (
           <div className="space-y-6">
+            {/* ... (grounding content unchanged) ... */}
             <div className="text-center mb-6">
               <h3 className="text-lg font-medium mb-2">
                 5-4-3-2-1 ग्राउंडिंग तकनीक
@@ -380,12 +419,14 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
               onChange={e => setJournalText(e.target.value)}
               placeholder="आज मैं महसूस कर रहा हूँ... / Today I am feeling..."
               className="min-h-32 resize-none border-primary/20 focus:border-primary/40"
+              disabled={isSaving} // *** NEW ***
             />
 
             <div className="text-center">
               <p className="text-xs text-muted-foreground">
-                आपके विचार सुरक्षित हैं और केवल आपके लिए हैं / Your thoughts are
-                safe and private
+                {isSaving // *** NEW ***
+                  ? 'Saving your entry...'
+                  : 'आपके विचार सुरक्षित हैं और केवल आपके लिए हैं / Your thoughts are safe and private'}
               </p>
             </div>
           </div>
@@ -394,6 +435,7 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
       case 3: // Soundscape
         return (
           <div className="space-y-6">
+            {/* ... (soundscape content, fixed as before) ... */}
             <div className="text-center mb-6">
               <h3 className="text-lg font-medium mb-2">
                 शांत आवाज़ें / Calming Sounds
@@ -433,9 +475,6 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
                       : 'bg-card border-primary/20 hover:border-primary/40'
                   }`}
                   onClick={() => {
-                    console.log('Soundscape selected:', sound.id);
-                    // Stop current audio when switching soundscapes
-                    stopAndCleanupAudio();
                     setSelectedSoundscape(sound.id);
                   }}
                 >
@@ -458,12 +497,9 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
               <Button
                 variant="outline"
                 onClick={() => {
-                  console.log('Mute button clicked, current soundEnabled:', soundEnabled);
                   const newSoundEnabled = !soundEnabled;
                   setSoundEnabled(newSoundEnabled);
-                  // Stop audio immediately when muting
                   if (!newSoundEnabled) {
-                    console.log('Muting audio');
                     stopAndCleanupAudio();
                   }
                 }}
@@ -482,19 +518,14 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
               {soundEnabled && (
                 <Button
                   onClick={() => {
-                    console.log('Play/Pause button clicked, current isAudioPlaying:', isAudioPlaying);
                     if (audioRef.current) {
                       if (isAudioPlaying) {
-                        console.log('Pausing audio');
                         audioRef.current.pause();
                       } else {
-                        console.log('Playing audio');
                         audioRef.current.play().catch((err) => {
                           console.log('Manual play failed:', err);
                         });
                       }
-                    } else {
-                      console.log('No audio reference available');
                     }
                   }}
                   className="bg-primary hover:bg-primary/90"
@@ -514,6 +545,7 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
       case 4: // Reflection
         return (
           <div className="space-y-6 text-center">
+            {/* ... (reflection content unchanged) ... */}
             <div className="mb-6">
               <h3 className="text-lg font-medium mb-2">
                 बहुत बढ़िया! / Excellent!
@@ -561,8 +593,9 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigateTo('home')}
+            onClick={handleExit} // *** MODIFIED ***
             className="mr-4 hover:bg-primary/10"
+            disabled={isSaving && currentStep === 2} // *** NEW ***
           >
             <ArrowLeft className="w-4 h-4" />
           </Button>
@@ -575,7 +608,7 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
           </div>
         </div>
 
-        {/* Progress indicator */}
+        {/* Progress indicator (unchanged) ... */}
         <div className="mb-8">
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div
@@ -585,7 +618,7 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
           </div>
         </div>
 
-        {/* Step content */}
+        {/* Step content (unchanged) ... */}
         <div className="mb-8">
           <Card className="p-8 bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
             <div className="mb-6 text-center">
@@ -601,12 +634,13 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
           </Card>
         </div>
 
+
         {/* Navigation */}
         <div className="flex justify-between">
           <Button
             variant="ghost"
             onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
-            disabled={currentStep === 0}
+            disabled={currentStep === 0 || isSaving} // *** MODIFIED ***
             className="hover:bg-primary/10"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -616,15 +650,23 @@ export function CalmDownSession({ navigateTo }: CalmDownSessionProps) {
           <Button
             onClick={handleNextStep}
             className="bg-primary hover:bg-primary/90"
+            disabled={isSaving && currentStep === 2} // *** NEW ***
           >
-            {currentStep === steps.length - 1
-              ? 'पूरा / Complete'
-              : 'आगे / Next'}
-            <ChevronRight className="w-4 h-4 ml-2" />
+            {isSaving && currentStep === 2 ? ( // *** NEW ***
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : null}
+            {isSaving && currentStep === 2 // *** NEW ***
+              ? 'Saving...'
+              : currentStep === steps.length - 1
+                ? 'पूरा / Complete'
+                : 'आगे / Next'}
+            {!(isSaving && currentStep === 2) && ( // *** NEW ***
+              <ChevronRight className="w-4 h-4 ml-2" />
+            )}
           </Button>
         </div>
 
-        {/* Instructions for current step */}
+        {/* Instructions (unchanged) ... */}
         {currentStep === 0 && (
           <Card className="p-6 mt-6 bg-card border-primary/20">
             <h3 className="font-medium mb-4">

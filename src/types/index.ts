@@ -51,6 +51,59 @@ export interface User {
   };
 }
 
+// Enhanced Activity-Based Therapy Types
+export type ActivityType = 
+  | 'guided_conversation' 
+  | 'cbt_exercise' 
+  | 'mindfulness_session' 
+  | 'assessment_activity' 
+  | 'group_therapy' 
+  | 'family_integration' 
+  | 'crisis_intervention' 
+  | 'cultural_therapy'
+  | 'breathing_exercise'
+  | 'journaling_prompt'
+  | 'mood_tracking'
+  | 'thought_challenge'
+  | 'behavior_experiment'
+  | 'grounding_technique';
+
+export interface ActivitySession {
+  sessionId: string;
+  userId: string;
+  activityType: ActivityType;
+  status: 'active' | 'paused' | 'completed' | 'abandoned';
+  startTime: Date;
+  currentStep: number;
+  totalSteps: number;
+  userEngagement: number;
+  culturalAdaptations: string[];
+  realTimeMetrics: {
+    emotionalState: string;
+    stressLevel: number;
+    responseTime: number;
+    comprehension: number;
+  };
+}
+
+export interface ActivityRecommendation {
+  activityType: ActivityType;
+  priority: number;
+  culturalRelevance: number;
+  estimatedDuration: number;
+  difficultyLevel: 'beginner' | 'intermediate' | 'advanced';
+  personalizedReason: string;
+  expectedOutcomes: string[];
+}
+
+export interface TherapeuticInsight {
+  category: 'emotional' | 'behavioral' | 'cognitive' | 'cultural' | 'social';
+  insight: string;
+  confidence: number;
+  actionable: boolean;
+  culturallyRelevant: boolean;
+}
+
 export interface VoiceAnalysis {
   transcript: string;
   confidence: number;

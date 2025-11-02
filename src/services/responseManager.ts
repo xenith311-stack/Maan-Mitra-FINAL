@@ -1,17 +1,19 @@
 // Personalized Therapy Memory System - Complete therapist-like personalization
 // Remembers everything: conversations, emotions, preferences, progress, triggers
 
+import { conversationMemory } from './conversationMemory';
+
 export interface UserProfile {
   // Basic preferences
   responseLength: 'short' | 'normal' | 'detailed';
   addressStyle: 'casual' | 'respectful' | 'formal';
   communicationStyle: 'direct' | 'gentle' | 'encouraging' | 'analytical';
-  
+
   // Remembered instructions and boundaries
   rememberedInstructions: string[];
   avoidTerms: string[];
   preferredTerms: string[];
-  
+
   // Emotional patterns and history
   emotionalHistory: Array<{
     emotion: string;
@@ -19,7 +21,7 @@ export interface UserProfile {
     timestamp: Date;
     context: string;
   }>;
-  
+
   // Conversation memory
   conversationHistory: Array<{
     userMessage: string;
@@ -28,7 +30,7 @@ export interface UserProfile {
     emotionalState: string;
     topics: string[];
   }>;
-  
+
   // Personal insights and progress
   personalInsights: {
     mainConcerns: string[];
@@ -38,14 +40,14 @@ export interface UserProfile {
     strengths: string[];
     goals: string[];
   };
-  
+
   // Therapy preferences
   therapyStyle: {
     preferredApproaches: string[]; // CBT, mindfulness, etc.
     sessionLength: 'brief' | 'standard' | 'extended';
     checkInFrequency: 'daily' | 'weekly' | 'as-needed';
   };
-  
+
   // Session tracking
   sessionData: {
     totalSessions: number;
@@ -117,8 +119,8 @@ export class PersonalizedTherapyManager {
   recordConversation(userMessage: string, aiResponse: string, emotionalState: string = 'neutral'): void {
     const topics = this.extractTopics(userMessage);
     const emotion = this.analyzeEmotion(userMessage);
-    
-    // Add to conversation history
+
+    // Add to conversation history (legacy support)
     this.userProfile.conversationHistory.push({
       userMessage,
       aiResponse,
@@ -144,10 +146,14 @@ export class PersonalizedTherapyManager {
     if (this.userProfile.conversationHistory.length > 50) {
       this.userProfile.conversationHistory = this.userProfile.conversationHistory.slice(-50);
     }
+
+    // Note: The new conversation memory system is now handled by the AI orchestrator
+    // This method is kept for backward compatibility and preference tracking
   }
 
   // Process any AI response with full personalization
   processResponse(response: string, userMessage?: string): string {
+    console.log("🔧 ResponseManager - Original response length:", response.length, "words:", response.split(/\s+/).length);
     let processedResponse = response;
 
     // Remove repetitive greetings and phrases
@@ -163,18 +169,25 @@ export class PersonalizedTherapyManager {
     processedResponse = processedResponse.replace(/sab theek ho jayega/gi, '');
     processedResponse = processedResponse.replace(/tension mat lo/gi, '');
     processedResponse = processedResponse.replace(/log kya kahenge/gi, '');
-    
+
     // Clean up extra spaces
     processedResponse = processedResponse.replace(/\s+/g, ' ').trim();
 
     // Enforce response length
+    const beforeLength = processedResponse.length;
     processedResponse = this.enforceLength(processedResponse);
+    const afterLength = processedResponse.length;
+
+    if (beforeLength !== afterLength) {
+      console.log("⚠️ ResponseManager - Length enforcement applied:", beforeLength, "→", afterLength);
+    }
 
     // Add personalization based on conversation history
     if (userMessage) {
       processedResponse = this.personalizeResponse(processedResponse, userMessage);
     }
 
+    console.log("🔧 ResponseManager - Final response length:", processedResponse.length, "words:", processedResponse.split(/\s+/).length);
     return processedResponse;
   }
 
@@ -182,20 +195,20 @@ export class PersonalizedTherapyManager {
     if (this.userProfile.responseLength === 'short') {
       // For short responses, limit to 2-3 sentences or 100 characters
       const sentences = response.split(/[.!?]+/).filter(s => s.trim().length > 0);
-      
+
       if (sentences.length > 3) {
         return sentences.slice(0, 3).join('. ').trim() + '.';
       }
-      
+
       if (response.length > 100) {
         // Find the last complete sentence within 100 characters
         const truncated = response.substring(0, 97);
         const lastPeriod = truncated.lastIndexOf('.');
         const lastExclamation = truncated.lastIndexOf('!');
         const lastQuestion = truncated.lastIndexOf('?');
-        
+
         const lastSentenceEnd = Math.max(lastPeriod, lastExclamation, lastQuestion);
-        
+
         if (lastSentenceEnd > 20) {
           return response.substring(0, lastSentenceEnd + 1);
         } else {
@@ -203,25 +216,25 @@ export class PersonalizedTherapyManager {
         }
       }
     } else if (this.userProfile.responseLength === 'detailed') {
-      // For detailed responses, ensure they are comprehensive but not too long (80-150 words)
+      // For detailed responses, ensure they are comprehensive but not too long (100-300 words)
       const wordCount = response.split(/\s+/).length;
-      if (wordCount < 80) {
+      if (wordCount < 100) {
         // If response is too short for detailed mode, add encouraging note
         return response + " I want to make sure I'm giving you the support you need. Could you tell me more about what's on your mind?";
-      } else if (wordCount > 150) {
-        // If response is too long, truncate to 150 words
+      } else if (wordCount > 300) {
+        // If response is too long, truncate to 300 words
         const words = response.split(/\s+/);
-        return words.slice(0, 150).join(' ') + '...';
+        return words.slice(0, 300).join(' ') + '...';
       }
     } else {
-      // For normal responses, keep them concise (80-120 words)
+      // For normal responses, keep them therapeutic but not too long (100-250 words)
       const wordCount = response.split(/\s+/).length;
-      if (wordCount > 120) {
+      if (wordCount > 250) {
         const words = response.split(/\s+/);
-        return words.slice(0, 120).join(' ') + '...';
+        return words.slice(0, 250).join(' ') + '...';
       }
     }
-    
+
     return response;
   }
 
@@ -248,7 +261,7 @@ export class PersonalizedTherapyManager {
   // Analyze emotional content
   private analyzeEmotion(message: string): { emotion: string; intensity: number } {
     const lowerMessage = message.toLowerCase();
-    
+
     // Stress/Anxiety
     if (lowerMessage.includes('very stressed') || lowerMessage.includes('panic')) return { emotion: 'stress', intensity: 0.9 };
     if (lowerMessage.includes('stressed') || lowerMessage.includes('anxious')) return { emotion: 'stress', intensity: 0.6 };
@@ -364,7 +377,7 @@ export class PersonalizedTherapyManager {
     const currentTopics = this.extractTopics(userMessage);
 
     // If user is repeating a topic, acknowledge the pattern
-    const repeatedTopics = currentTopics.filter(topic => 
+    const repeatedTopics = currentTopics.filter(topic =>
       recentTopics.filter(rt => rt === topic).length >= 2
     );
 
@@ -462,7 +475,7 @@ export class PersonalizedTherapyManager {
   }
 
   // Generate comprehensive personalized prompt for AI services
-  getPersonalizedPrompt(): string {
+  getPersonalizedPrompt(userId?: string): string {
     const profile = this.userProfile;
     let prompt = '\n\n=== PERSONALIZED THERAPY CONTEXT ===\n';
 
@@ -473,7 +486,7 @@ export class PersonalizedTherapyManager {
     } else if (profile.responseLength === 'detailed') {
       prompt += '- Provide detailed, thorough explanations\n';
     }
-    
+
     prompt += `- Communication style: ${profile.communicationStyle}\n`;
     prompt += `- Address style: ${profile.addressStyle}\n`;
 
@@ -511,13 +524,43 @@ export class PersonalizedTherapyManager {
       prompt += `USER'S GOALS: ${profile.personalInsights.goals.slice(-2).join('; ')}\n`;
     }
 
-    // Recent conversation context (limited to prevent repetition)
-    const recentConversations = profile.conversationHistory.slice(-2);
-    if (recentConversations.length > 0) {
-      prompt += `\nRECENT CONVERSATION CONTEXT:\n`;
-      recentConversations.forEach((conv, i) => {
-        prompt += `${i + 1}. User: "${conv.userMessage.substring(0, 50)}..." (${conv.emotionalState})\n`;
-      });
+    // Enhanced conversation context from memory system
+    if (userId) {
+      try {
+        const conversationStats = conversationMemory.getUserConversationStats(userId);
+        if (conversationStats.totalConversations > 0) {
+          prompt += `\nCONVERSATION INSIGHTS:\n`;
+          prompt += `- Total conversations: ${conversationStats.totalConversations}\n`;
+          prompt += `- Communication style: ${conversationStats.communicationStyle}\n`;
+          prompt += `- Average engagement: ${Math.round(conversationStats.averageEngagement * 100)}%\n`;
+
+          if (conversationStats.preferredTopics.length > 0) {
+            prompt += `- Frequently discussed: ${conversationStats.preferredTopics.slice(0, 3).join(', ')}\n`;
+          }
+
+          if (conversationStats.emotionalProgress.improvement > 0.1) {
+            prompt += `- Emotional progress: Improving (${Math.round(conversationStats.emotionalProgress.improvement * 100)}%)\n`;
+          }
+        }
+      } catch (error) {
+        // Fallback to legacy conversation context if memory system fails
+        const recentConversations = profile.conversationHistory.slice(-2);
+        if (recentConversations.length > 0) {
+          prompt += `\nRECENT CONVERSATION CONTEXT:\n`;
+          recentConversations.forEach((conv, i) => {
+            prompt += `${i + 1}. User: "${conv.userMessage.substring(0, 50)}..." (${conv.emotionalState})\n`;
+          });
+        }
+      }
+    } else {
+      // Legacy conversation context
+      const recentConversations = profile.conversationHistory.slice(-2);
+      if (recentConversations.length > 0) {
+        prompt += `\nRECENT CONVERSATION CONTEXT:\n`;
+        recentConversations.forEach((conv, i) => {
+          prompt += `${i + 1}. User: "${conv.userMessage.substring(0, 50)}..." (${conv.emotionalState})\n`;
+        });
+      }
     }
 
     // Emotional patterns
@@ -555,12 +598,12 @@ export class PersonalizedTherapyManager {
   startSession(): void {
     this.userProfile.sessionData.totalSessions += 1;
     this.userProfile.sessionData.lastSession = new Date();
-    
+
     // Update streak
     const daysSinceLastSession = Math.floor(
       (new Date().getTime() - this.userProfile.sessionData.lastSession.getTime()) / (1000 * 60 * 60 * 24)
     );
-    
+
     if (daysSinceLastSession <= 1) {
       this.userProfile.sessionData.currentStreak += 1;
     } else if (daysSinceLastSession > 7) {

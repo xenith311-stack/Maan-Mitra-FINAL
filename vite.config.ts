@@ -1,30 +1,32 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react-swc'
+import path from 'path'
 
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react-swc';
-import path from 'path';
-
+// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  define: {
-    global: 'globalThis',
-  },
   resolve: {
-    extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    port: 5173, // Default Vite port - sometimes more permissive
+    open: true,
+  },
   build: {
-    target: 'esnext',
-    outDir: 'build',
+    outDir: 'dist',
     sourcemap: true,
   },
-  server: {
-    port: 3000,
-    open: true,
-    cors: true,
+  define: {
+    'process.env': {},
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react-router-dom'],
-  },
-});
+    esbuildOptions: {
+      loader: {
+        '.js': 'jsx',
+        '.jsx': 'jsx'
+      }
+    }
+  }
+})

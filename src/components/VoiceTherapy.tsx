@@ -1,9 +1,54 @@
 import { useState, useEffect, useRef } from 'react';
 
 import { Mic, MicOff, Play, RotateCcw, Heart, CheckCircle, ArrowRight, Home } from 'lucide-react';
-import { voiceAnalysis, type VoiceAnalysisResult } from '../services/voiceAnalysis';
-import { voiceAI, AVAILABLE_VOICES, type VoiceOption } from '../services/speechServices';
-import { personalizedTherapy } from '../services/responseManager';
+// Removed voiceAnalysis import - now using unified STT approach
+import { AVAILABLE_VOICES, type VoiceOption } from '../services/speechServices';
+// Local VoiceAnalysisResult interface for therapy processing
+interface VoiceAnalysisResult {
+  transcript: string;
+  confidence: number;
+  language: string;
+  emotionalIndicators: {
+    tone: 'calm' | 'stressed' | 'sad' | 'anxious' | 'happy' | 'angry' | 'neutral';
+    intensity: number;
+    valence: number;
+    arousal: number;
+    speechRate: 'very_slow' | 'slow' | 'normal' | 'fast' | 'very_fast';
+    volume: 'whisper' | 'quiet' | 'normal' | 'loud' | 'shouting';
+    pitch: 'very_low' | 'low' | 'normal' | 'high' | 'very_high';
+  };
+  linguisticFeatures: {
+    wordCount: number;
+    sentimentScore: number;
+    complexityScore: number;
+    hesitationMarkers: number;
+    fillerWords: number;
+    emotionalWords: string[];
+    culturalExpressions: string[];
+  };
+  mentalHealthIndicators: {
+    stressLevel: number;
+    depressionIndicators: string[];
+    anxietyIndicators: string[];
+    cognitiveLoad: number;
+    emotionalRegulation: number;
+  };
+  culturalContext: {
+    languageMixing: number;
+    culturalReferences: string[];
+    formalityLevel: number;
+    respectMarkers: string[];
+  };
+  recommendations: {
+    immediate: string[];
+    therapeutic: string[];
+    communication: string[];
+  };
+}
+import { useAuth } from './auth/AuthProvider';
+import { firebaseService } from '../services/firebaseService';
+import { httpsCallable, getFunctions } from 'firebase/functions';
+import { toast } from 'sonner';
 
 interface TherapyExercise {
   id: string;
@@ -27,18 +72,27 @@ interface TherapyScenario {
   steps: InteractiveStep[];
 }
 
+// Define types for multilingual strings
+type LangString = {
+  [key: string]: string; // e.g., { en: "Hello", hi: "नमस्ते", mr: "नमस्कार" }
+};
+
+type LangStringArray = {
+  [key: string]: string[]; // e.g., { en: ["Great!"], hi: ["बढ़िया!"] }
+};
+
 interface InteractiveStep {
   id: string;
   type: 'choice' | 'voice' | 'breathing' | 'reflection' | 'challenge';
-  title: string;
-  instruction: string;
-  voiceGuide: string;
+  title: LangString;
+  instruction: LangString;
+  voiceGuide: LangString;
   choices?: Choice[];
-  expectedResponse?: string;
+  expectedResponse?: LangString;
   feedback: {
-    positive: string[];
-    encouraging: string[];
-    guidance: string[];
+    positive: LangStringArray;
+    encouraging: LangStringArray;
+    guidance: LangStringArray;
   };
   duration?: number;
   points?: number;
@@ -46,9 +100,9 @@ interface InteractiveStep {
 
 interface Choice {
   id: string;
-  text: string;
+  text: LangString;
   emoji: string;
-  response: string;
+  response: LangString;
   nextStep?: string;
   points: number;
 }
@@ -88,60 +142,7 @@ const THERAPY_EXERCISES: TherapyExercise[] = [
         id: 'power-voice',
         title: 'Find Your Power Voice',
         description: 'Discover the voice that commands respect',
-        steps: [
-          {
-            id: 'mood-check',
-            type: 'choice',
-            title: 'How are you feeling right now?',
-            instruction: 'Choose your current energy level',
-            voiceGuide: 'Let\'s start by checking in with your energy. How are you feeling right now?',
-            choices: [
-              { id: 'energetic', text: 'Energetic & Ready', emoji: '⚡', response: 'Amazing! That energy will fuel your confidence!', points: 10 },
-              { id: 'nervous', text: 'Nervous but Willing', emoji: '😰', response: 'Perfect! Nervousness means you care. Let\'s channel that energy!', points: 15 },
-              { id: 'tired', text: 'Tired but Trying', emoji: '😴', response: 'I admire your commitment! Let\'s build energy together!', points: 20 },
-              { id: 'excited', text: 'Excited to Grow', emoji: '🚀', response: 'Your excitement is contagious! Let\'s harness that power!', points: 10 }
-            ],
-            feedback: {
-              positive: ['Your honesty is the first step to growth!'],
-              encouraging: ['Every feeling is valid and useful!'],
-              guidance: ['Let\'s use this energy to build something amazing!']
-            },
-            points: 5
-          },
-          {
-            id: 'power-phrase',
-            type: 'voice',
-            title: 'Speak Your Power Phrase',
-            instruction: 'Say "I am powerful and confident" with conviction',
-            voiceGuide: 'Now, I want you to say "I am powerful and confident" - but not just say it, DECLARE it! Let me hear your power!',
-            expectedResponse: 'I am powerful and confident',
-            feedback: {
-              positive: ['WOW! I can hear the strength in your voice!', 'That was incredible! You sound like a leader!', 'Amazing! Your confidence is shining through!'],
-              encouraging: ['Good start! Now let\'s add even more power to that voice!', 'I can hear your potential! Let\'s unlock more of it!', 'Nice! Your voice is getting stronger!'],
-              guidance: ['Try speaking from your chest, not your throat', 'Stand tall and project your voice forward', 'Imagine you\'re speaking to inspire 1000 people']
-            },
-            points: 25
-          },
-          {
-            id: 'challenge-choice',
-            type: 'choice',
-            title: 'Choose Your Challenge',
-            instruction: 'What confidence challenge excites you most?',
-            voiceGuide: 'You\'re doing great! Now, what challenge would push you to grow the most?',
-            choices: [
-              { id: 'presentation', text: 'Give a Mini Presentation', emoji: '🎤', response: 'Bold choice! Let\'s make you a presentation master!', points: 30 },
-              { id: 'compliment', text: 'Give Yourself Compliments', emoji: '💖', response: 'Self-love is the foundation of confidence!', points: 25 },
-              { id: 'story', text: 'Tell an Inspiring Story', emoji: '📖', response: 'Stories have power! Let\'s unleash yours!', points: 35 },
-              { id: 'debate', text: 'Argue Your Point', emoji: '⚖️', response: 'Excellent! Let\'s build your persuasive power!', points: 40 }
-            ],
-            feedback: {
-              positive: ['Your choice shows real courage!'],
-              encouraging: ['This challenge will unlock new levels of confidence!'],
-              guidance: ['Remember, growth happens outside your comfort zone!']
-            },
-            points: 10
-          }
-        ]
+        steps: []
       }
     ]
   },
@@ -162,55 +163,7 @@ const THERAPY_EXERCISES: TherapyExercise[] = [
         id: 'calm-warrior',
         title: 'Become the Calm Warrior',
         description: 'Learn to face anxiety with strength and grace',
-        steps: [
-          {
-            id: 'anxiety-level',
-            type: 'choice',
-            title: 'What\'s your anxiety level right now?',
-            instruction: 'Be honest about how you\'re feeling',
-            voiceGuide: 'First, let\'s acknowledge where you are right now. What\'s your anxiety level?',
-            choices: [
-              { id: 'low', text: 'Pretty Calm', emoji: '😌', response: 'Great! Let\'s build on that calm energy!', points: 10 },
-              { id: 'medium', text: 'Somewhat Anxious', emoji: '😟', response: 'That\'s normal! We\'ll work through this together!', points: 15 },
-              { id: 'high', text: 'Very Anxious', emoji: '😰', response: 'I\'m proud of you for being here. You\'re already being brave!', points: 25 },
-              { id: 'panic', text: 'Feeling Panicky', emoji: '😱', response: 'You\'re safe here. Let\'s take this one breath at a time.', points: 30 }
-            ],
-            feedback: {
-              positive: ['Acknowledging your feelings takes courage!'],
-              encouraging: ['You\'re not alone in this journey!'],
-              guidance: ['Every warrior starts by knowing their battlefield!']
-            },
-            points: 5
-          },
-          {
-            id: 'warrior-breath',
-            type: 'breathing',
-            title: 'Warrior\'s Breath',
-            instruction: 'Breathe like a warrior - strong and steady',
-            voiceGuide: 'Now, let\'s breathe like a warrior. Strong, steady, unshakeable. Breathe in strength for 4 counts, hold your power for 4, release fear for 6. Ready?',
-            feedback: {
-              positive: ['Your breathing is getting stronger!', 'I can hear the warrior in you!', 'That\'s the breath of someone who won\'t give up!'],
-              encouraging: ['Keep going, you\'re building strength with each breath!', 'Every breath is making you more powerful!'],
-              guidance: ['Feel your feet on the ground', 'Imagine breathing in courage', 'Let each exhale release the tension']
-            },
-            duration: 60000,
-            points: 20
-          },
-          {
-            id: 'fear-challenge',
-            type: 'voice',
-            title: 'Challenge Your Fear',
-            instruction: 'Say "I am stronger than my anxiety" with power',
-            voiceGuide: 'Now, look your anxiety in the eye and declare: "I am stronger than my anxiety!" Say it like you mean it!',
-            expectedResponse: 'I am stronger than my anxiety',
-            feedback: {
-              positive: ['YES! That\'s the voice of a true warrior!', 'Incredible! Your anxiety just heard your strength!', 'Amazing! You just declared war on fear!'],
-              encouraging: ['Good! Now let\'s make that voice even more powerful!', 'I can hear your strength growing!', 'That\'s it! Keep claiming your power!'],
-              guidance: ['Speak from your core, not your throat', 'Imagine your anxiety shrinking as you speak', 'Feel the truth of those words in your body']
-            },
-            points: 35
-          }
-        ]
+        steps: []
       }
     ]
   },
@@ -231,41 +184,7 @@ const THERAPY_EXERCISES: TherapyExercise[] = [
         id: 'emotion-map',
         title: 'Map Your Emotional Landscape',
         description: 'Explore and understand your current emotional state',
-        steps: [
-          {
-            id: 'emotion-wheel',
-            type: 'choice',
-            title: 'What emotion is strongest right now?',
-            instruction: 'Choose the emotion that feels most present',
-            voiceGuide: 'Let\'s explore your emotional landscape. What emotion feels strongest in your body right now?',
-            choices: [
-              { id: 'joy', text: 'Joy & Happiness', emoji: '😊', response: 'Beautiful! Let\'s amplify that joy!', points: 15 },
-              { id: 'sadness', text: 'Sadness & Grief', emoji: '😢', response: 'Your sadness is valid and important. Let\'s honor it.', points: 20 },
-              { id: 'anger', text: 'Anger & Frustration', emoji: '😠', response: 'Anger often protects something precious. Let\'s explore it.', points: 25 },
-              { id: 'fear', text: 'Fear & Worry', emoji: '😨', response: 'Fear is trying to keep you safe. Let\'s understand its message.', points: 20 },
-              { id: 'mixed', text: 'Mixed Emotions', emoji: '🌈', response: 'Complex emotions show your depth. Let\'s untangle them together.', points: 30 }
-            ],
-            feedback: {
-              positive: ['Your emotional awareness is impressive!'],
-              encouraging: ['Every emotion has wisdom to offer!'],
-              guidance: ['Let\'s dive deeper into what this emotion is telling you!']
-            },
-            points: 10
-          },
-          {
-            id: 'emotion-story',
-            type: 'voice',
-            title: 'Tell Your Emotion\'s Story',
-            instruction: 'Describe what this emotion feels like in your body',
-            voiceGuide: 'Now, I want you to describe this emotion. Where do you feel it in your body? What does it want you to know? Speak freely.',
-            feedback: {
-              positive: ['Your emotional vocabulary is growing!', 'That\'s such insightful self-awareness!', 'You\'re becoming an emotion expert!'],
-              encouraging: ['Keep exploring, you\'re doing great!', 'Every word helps you understand yourself better!', 'Your emotions are lucky to have such a thoughtful observer!'],
-              guidance: ['Try to feel the emotion in your body as you speak', 'What would this emotion say if it could talk?', 'Notice any images or memories that come up']
-            },
-            points: 30
-          }
-        ]
+        steps: []
       }
     ]
   },
@@ -286,144 +205,23 @@ const THERAPY_EXERCISES: TherapyExercise[] = [
         id: 'stress-destroyer',
         title: 'Become a Stress Destroyer',
         description: 'Use your voice as a powerful stress-busting tool',
-        steps: [
-          {
-            id: 'stress-meter',
-            type: 'choice',
-            title: 'How stressed are you feeling?',
-            instruction: 'Rate your current stress level',
-            voiceGuide: 'Let\'s check your stress meter! How wound up are you feeling right now?',
-            choices: [
-              { id: 'chill', text: 'Pretty Relaxed', emoji: '😎', response: 'Nice! Let\'s keep you in that zen zone!', points: 10 },
-              { id: 'medium', text: 'Moderately Stressed', emoji: '😤', response: 'Time to release that tension! Let\'s do this!', points: 15 },
-              { id: 'high', text: 'Very Stressed', emoji: '🤯', response: 'Perfect! We\'re about to blast that stress away!', points: 20 },
-              { id: 'overwhelmed', text: 'Completely Overwhelmed', emoji: '😵', response: 'You came to the right place! Let\'s demolish that stress!', points: 25 }
-            ],
-            feedback: {
-              positive: ['Great awareness of your stress levels!'],
-              encouraging: ['We\'re about to turn that stress into strength!'],
-              guidance: ['Get ready to feel amazing!']
-            },
-            points: 5
-          },
-          {
-            id: 'stress-shout',
-            type: 'voice',
-            title: 'Stress Release Shout',
-            instruction: 'Shout "STRESS BE GONE!" as loud as you can',
-            voiceGuide: 'Now, we\'re going to blast that stress away! I want you to shout "STRESS BE GONE!" as loud as you can. Ready? Let it RIP!',
-            expectedResponse: 'STRESS BE GONE',
-            feedback: {
-              positive: ['YESSS! That was POWERFUL!', 'WOW! I felt that energy from here!', 'INCREDIBLE! Your stress just ran away scared!'],
-              encouraging: ['Good! Now let\'s make it even LOUDER!', 'I can feel your power building!', 'That\'s it! Let it all out!'],
-              guidance: ['Shout from your belly, not your throat!', 'Imagine blasting the stress out of your body!', 'Feel the release with every word!']
-            },
-            points: 40
-          }
-        ]
+        steps: []
       }
     ]
   }
 ];
 
-// This function is now handled by the PersonalizedTherapyManager
-
-// Comprehensive personalized therapy response generator
-// SIMPLE WORKING THERAPY RESPONSE - NO MORE BROKEN AI!
-async function generatePersonalizedTherapyResponse(
-  userMessage: string, 
-  profile: any
-): Promise<string> {
-  const lowerMessage = userMessage.toLowerCase();
-  const isShort = profile.responseLength === 'short';
-  
-  console.log('🎯 User said:', userMessage);
-  console.log('📏 Short mode:', isShort);
-  
-  // IMMEDIATE PREFERENCE CHANGES
-  if (lowerMessage.includes('short')) {
-    personalizedTherapy.updateProfile({ responseLength: 'short' });
-    return "Short responses set.";
-  }
-  
-  if (lowerMessage.includes('longer') || lowerMessage.includes('detailed')) {
-    personalizedTherapy.updateProfile({ responseLength: 'normal' });
-    return "I'll give more detailed responses now.";
-  }
-  
-  // SIMPLE DIRECT RESPONSES - NO REPETITIVE PHRASES
-  
-  // Greetings
-  if (lowerMessage.includes('hi') || lowerMessage.includes('hello')) {
-    return isShort ? "Hi. How are you?" : "Hello. How are you feeling today?";
-  }
-  
-  // Emotions - SPECIFIC responses, no generic phrases
-  if (lowerMessage.includes('anxious')) {
-    return isShort ? "What's making you anxious?" : "What's causing your anxiety right now?";
-  }
-  
-  if (lowerMessage.includes('stress')) {
-    return isShort ? "What's stressing you?" : "What's the main source of your stress?";
-  }
-  
-  if (lowerMessage.includes('sad')) {
-    return isShort ? "What's making you sad?" : "What's been making you feel sad?";
-  }
-  
-  if (lowerMessage.includes('angry')) {
-    return isShort ? "What made you angry?" : "What triggered your anger?";
-  }
-  
-  if (lowerMessage.includes('happy') || lowerMessage.includes('good')) {
-    return isShort ? "That's great!" : "I'm glad you're feeling good. What's going well?";
-  }
-  
-  // Acknowledgments
-  if (lowerMessage.includes('thank')) {
-    return isShort ? "You're welcome." : "You're welcome. How else can I help?";
-  }
-  
-  if (lowerMessage.includes('yes')) {
-    return isShort ? "Okay." : "I understand. What would you like to talk about?";
-  }
-  
-  if (lowerMessage.includes('no')) {
-    return isShort ? "Alright." : "That's okay. What would you prefer to discuss?";
-  }
-  
-  // Problems
-  if (lowerMessage.includes('problem') || lowerMessage.includes('issue')) {
-    return isShort ? "What's the problem?" : "Tell me about the problem you're facing.";
-  }
-  
-  if (lowerMessage.includes('help')) {
-    return isShort ? "How can I help?" : "I'm here to help. What do you need support with?";
-  }
-  
-  // Family/Relationships
-  if (lowerMessage.includes('family')) {
-    return isShort ? "What about your family?" : "What's happening with your family?";
-  }
-  
-  if (lowerMessage.includes('friend')) {
-    return isShort ? "Tell me about your friends." : "What's going on with your friends?";
-  }
-  
-  // Work/Study
-  if (lowerMessage.includes('work') || lowerMessage.includes('job')) {
-    return isShort ? "What about work?" : "What's happening at work?";
-  }
-  
-  if (lowerMessage.includes('study') || lowerMessage.includes('exam')) {
-    return isShort ? "How are your studies?" : "How are your studies going?";
-  }
-  
-  // DEFAULT - Simple, direct, NO repetitive phrases
-  return isShort ? "Tell me more." : "Can you tell me more about that?";
-}
+// Chat functionality removed - use /companion route for AI chat
 
 export default function VoiceTherapy() {
+  const { userProfile, currentUser } = useAuth(); // Get user profile for language preferences
+
+  // Language Helper Function
+  const getLangKey = (voice: VoiceOption): string => {
+    const lang = voice.language.split('-')[0] || 'en'; // 'hi-IN' -> 'hi', 'en-GB' -> 'en'
+    return lang; // Returns 'en', 'hi', 'mr', 'bn', etc.
+  };
+
   const [currentSession, setCurrentSession] = useState<VoiceSession | null>(null);
   const [selectedScenario, setSelectedScenario] = useState<TherapyScenario | null>(null);
   const [isActive, setIsActive] = useState(false);
@@ -438,26 +236,58 @@ export default function VoiceTherapy() {
   const [showChoices, setShowChoices] = useState(false);
   const [waitingForVoice, setWaitingForVoice] = useState(false);
   const [celebrationMode, setCelebrationMode] = useState(false);
-  const [selectedVoice, setSelectedVoice] = useState<VoiceOption>(AVAILABLE_VOICES[0]!);
+  // Initialize selectedVoice from user preferences or default
+  const [selectedVoice, setSelectedVoice] = useState<VoiceOption>(() => {
+    const savedVoiceURI = userProfile?.preferences?.selectedVoice;
+    if (savedVoiceURI) {
+      const savedVoice = AVAILABLE_VOICES.find(v => v.voiceURI === savedVoiceURI || v.name === savedVoiceURI);
+      if (savedVoice) return savedVoice;
+    }
+    return AVAILABLE_VOICES[0]!;
+  });
   const [showVoiceSelector, setShowVoiceSelector] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [autoPlayVoice, setAutoPlayVoice] = useState(true);
-  const [showChatMode, setShowChatMode] = useState(false);
-  const [chatMessages, setChatMessages] = useState<Array<{ type: 'user' | 'ai', message: string, timestamp: Date }>>([]);
-  
-  // User preferences are now handled by PersonalizedTherapyManager
-  const [isInChatMode, setIsInChatMode] = useState(false);
+  const [inputValue, setInputValue] = useState<string>('');
+  // ADD THIS
+  const [conversationHistory, setConversationHistory] = useState<{ role: 'user' | 'model', content: string }[]>([]);
+  const [currentStep, setCurrentStep] = useState<any | null>(null); // This will hold the AI-generated step
 
   const stepTimerRef = useRef<NodeJS.Timeout | null>(null);
   const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
-  // Initialize personalized therapy session
-  useEffect(() => {
-    personalizedTherapy.startSession();
-    console.log('Personalized therapy session started:', personalizedTherapy.getProfile());
-  }, []);
+  // Voice therapy session initialization
+
+  // Save voice preference to user profile
+  const saveVoicePreference = async (voice: VoiceOption) => {
+    if (!currentUser) return;
+
+    try {
+      await firebaseService.updateUserProfile(currentUser.uid, {
+        preferences: {
+          language: userProfile?.preferences?.language || 'mixed',
+          culturalBackground: userProfile?.preferences?.culturalBackground || '',
+          communicationStyle: userProfile?.preferences?.communicationStyle || 'casual',
+          interests: userProfile?.preferences?.interests || [],
+          comfortEnvironment: userProfile?.preferences?.comfortEnvironment || '',
+          avatarStyle: userProfile?.preferences?.avatarStyle || '',
+          notificationsEnabled: userProfile?.preferences?.notificationsEnabled || true,
+          ...userProfile?.preferences,
+          selectedVoice: voice.voiceURI || voice.name
+        }
+      });
+      console.log('Voice preference saved:', voice.name);
+    } catch (error) {
+      console.error('Failed to save voice preference:', error);
+      toast.error('Failed to save voice preference');
+    }
+  };
 
   // Utility functions
   const formatTime = (seconds: number) => {
@@ -529,16 +359,25 @@ export default function VoiceTherapy() {
       if (stepTimerRef.current) clearInterval(stepTimerRef.current);
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
       if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
-      voiceAnalysis.stopVoiceAnalysis();
+      // Cleanup MediaRecorder if active
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+      // Stop any playing audio
+      if (audioSourceRef.current) {
+        audioSourceRef.current.stop();
+      }
     };
   }, []);
 
-  const startSession = (exercise: TherapyExercise, scenario: TherapyScenario) => {
+  // Replace your existing startSession
+  const startSession = async (exercise: TherapyExercise, scenario: TherapyScenario) => {
+    console.log('Starting dynamic session for:', exercise.title);
     const session: VoiceSession = {
       id: Date.now().toString(),
       startTime: new Date(),
       exercise,
-      scenario,
+      scenario, // We still pass the *idea* of the scenario
       currentStep: 0,
       progress: 0,
       voiceAnalysis: [],
@@ -548,214 +387,112 @@ export default function VoiceTherapy() {
       completed: false,
       mood: 'excited',
       selectedVoice,
-      isUserControlled: exercise.isUserControlled
+      isUserControlled: exercise.isUserControlled,
     };
-
-    // Set the selected voice for the AI
-    voiceAI.setVoice(selectedVoice);
 
     setCurrentSession(session);
-    setSelectedScenario(scenario);
+    setSelectedScenario(scenario); // Keep this for context
     setIsActive(true);
     setSessionTime(0);
-    setStepProgress(0);
+    setConversationHistory([]); // Reset history
+    setCurrentStep(null); // Clear current step
     setShowCompletion(false);
-    setUserFeedback('');
-    setCurrentFeedback('');
-    setShowChoices(false);
-    setWaitingForVoice(false);
-    setCelebrationMode(false);
 
-    // Start with an exciting intro
-    setTimeout(() => {
-      executeStep(session, 0);
-    }, 1000);
-  };
-
-  const executeStep = async (session: VoiceSession, stepIndex: number) => {
-    if (stepIndex >= session.scenario.steps.length) {
-      completeSession();
-      return;
-    }
-
-    const step = session.scenario.steps[stepIndex];
-    if (!step) return;
-
-    console.log(`Executing step ${stepIndex + 1}: ${step.title} (${step.type})`);
-
-    setStepProgress(0);
-    setCurrentFeedback('');
-    setShowChoices(false);
-    setWaitingForVoice(false);
-    setCelebrationMode(false);
-
-    // Always speak the voice guide first if auto-play is enabled
-    if (autoPlayVoice && voiceAI.isVoiceSupported() && !isPaused) {
-      setIsPlaying(true);
+    // --- NEW: Log session start activity ---
+    if (currentUser) {
       try {
-        await voiceAI.respondWithVoice(step.voiceGuide, 'en-IN', selectedVoice.personality as any, selectedVoice);
+        await firebaseService.logUserActivity(
+          currentUser.uid,
+          'started_voice_session',
+          {
+            exercise: exercise.title,
+            exerciseType: exercise.type,
+            scenario: scenario.title,
+            difficulty: exercise.difficulty
+          }
+        );
       } catch (error) {
-        console.warn('Voice guide failed:', error);
+        console.warn('Failed to log session start activity:', error);
       }
-      setIsPlaying(false);
     }
+    // --- END NEW ---
 
-    // Handle different step types - USER CONTROLLED
-    if (step.type === 'choice') {
-      setShowChoices(true);
-      // Show a helpful message
-      setCurrentFeedback("Choose one of the options below to continue:");
-    } else if (step.type === 'voice') {
-      setWaitingForVoice(true);
-      setCurrentFeedback("Click 'Start Speaking' when you're ready to use your voice:");
-    } else if (step.type === 'breathing') {
-      setCurrentFeedback("Take your time with this breathing exercise. Click 'Start' when ready:");
-      // Don't auto-start breathing, let user control it
-    } else {
-      setCurrentFeedback("Read the instruction above and click 'Continue' when you're ready:");
+    // --- NEW: Call the AI Engine to get the FIRST step ---
+    try {
+      await advanceSession(session, { type: 'start' });
+    } catch (error) {
+      console.error("Failed to start session:", error);
+      toast.error("Could not start AI session. Please try again.");
+      resetSession();
     }
   };
 
+  // Add this new function to your component
+  const advanceSession = async (session: VoiceSession, userInput: any) => {
+    if (!session) return;
 
-
-
-
-  const handleVoiceResponse = (result: VoiceAnalysisResult) => {
-    if (!currentSession || !selectedScenario) return;
-
-    const currentStep = selectedScenario.steps[currentSession.currentStep];
-    if (!currentStep) return;
-
-    console.log('Voice response received:', result.transcript);
-
-    // Clear any existing timers
-    if (progressTimerRef.current) {
-      clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
+    // 1. Add user input to history (if it's not the start)
+    let newHistory = [...conversationHistory];
+    if (userInput.type !== 'start') {
+      newHistory.push({ role: 'user', content: userInput.value });
     }
 
-    setVoiceAnalysisResults(prev => [...prev, result]);
+    // 2. Call the backend "brain"
+    try {
+      const result = await advanceTherapySession({
+        exercise: { id: session.exercise.id, title: session.exercise.title },
+        scenario: { id: session.scenario.id, title: session.scenario.title },
+        history: newHistory,
+        lastUserInput: userInput,
+      });
 
-    // Stop listening
-    stopListening();
-    setWaitingForVoice(false);
+      const { nextStep } = result.data as any;
 
-    // Analyze the response and give feedback
-    const feedback = analyzeVoiceResponse(result, currentStep);
-    setCurrentFeedback(feedback.message);
+      // 3. Add AI response to history
+      newHistory.push({ role: 'model', content: nextStep.voiceGuide });
+      setConversationHistory(newHistory);
+      setCurrentStep(nextStep); // <-- This triggers the UI update
 
-    // Add points
-    const updatedSession = {
-      ...currentSession,
-      points: currentSession.points + feedback.points
-    };
-    setCurrentSession(updatedSession);
-
-    // Speak feedback
-    if (voiceAI.isVoiceSupported()) {
-      try {
-        voiceAI.respondWithVoice(feedback.message, 'en-IN', 'supportive');
-      } catch (error) {
-        console.warn('Feedback voice failed:', error);
-      }
-    }
-
-    setCelebrationMode(true);
-
-    // Continue after feedback
-    setTimeout(() => {
-      setCelebrationMode(false);
+      // 4. Update UI based on AI response
+      setWaitingForVoice(false);
+      setShowChoices(false);
       setCurrentFeedback('');
-      nextStep();
-    }, 4000);
-  };
 
-  const analyzeVoiceResponse = (result: VoiceAnalysisResult, step: InteractiveStep) => {
-    const transcript = result.transcript.toLowerCase();
-    const confidence = result.confidence;
-    const intensity = result.emotionalIndicators.intensity;
-
-    let points = 10;
-    let message = '';
-
-    if (step.expectedResponse) {
-      const expected = step.expectedResponse.toLowerCase();
-      const similarity = transcript.includes(expected.split(' ')[0] || '') ? 0.8 : 0.3;
-
-      if (similarity > 0.7 && intensity > 0.6) {
-        message = step.feedback.positive[Math.floor(Math.random() * step.feedback.positive.length)] || 'Great job!';
-        points = 30;
-      } else if (similarity > 0.5 || intensity > 0.4) {
-        message = step.feedback.encouraging[Math.floor(Math.random() * step.feedback.encouraging.length)] || 'Keep going!';
-        points = 20;
-      } else {
-        message = step.feedback.guidance[Math.floor(Math.random() * step.feedback.guidance.length)] || 'Try again!';
-        points = 15;
+      // 5. Speak the AI's response
+      if (autoPlayVoice && !isPaused) {
+        await speakText(nextStep.voiceGuide, selectedVoice);
       }
-    } else {
-      // General voice analysis
-      if (confidence > 0.8 && intensity > 0.6) {
-        message = "Incredible! Your voice is full of power and conviction!";
-        points = 25;
-      } else if (confidence > 0.6) {
-        message = "Great job! I can hear your strength growing!";
-        points = 20;
-      } else {
-        message = "Good effort! Keep practicing and your voice will get stronger!";
-        points = 15;
+
+      // 6. Set up UI for next user input
+      if (nextStep.type === 'choice') {
+        setShowChoices(true);
+      } else if (nextStep.type === 'voice') {
+        setWaitingForVoice(true);
+      } else if (nextStep.type === 'complete') {
+        await completeSession();
       }
-    }
 
-    return { message, points };
+      // 7. Update session state
+      setCurrentSession(prev => prev ? ({
+        ...prev,
+        points: prev.points + (nextStep.points || 0),
+        currentStep: prev.currentStep + 1,
+        progress: Math.min(95, prev.progress + 10), // Update progress
+      }) : null);
+
+    } catch (error: any) {
+      console.error("Error advancing session:", error);
+      toast.error(`AI Error: ${error.message || 'Could not get next step.'}`);
+    }
   };
 
 
 
-  const nextStep = () => {
-    if (!currentSession || !selectedScenario) {
-      console.log('Cannot proceed: missing session or scenario');
-      return;
-    }
 
-    console.log(`Moving to next step. Current: ${currentSession.currentStep}, Total: ${selectedScenario.steps.length}`);
 
-    // Clear all timers
-    if (progressTimerRef.current) {
-      clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
-    }
 
-    stopListening();
 
-    const nextStepIndex = currentSession.currentStep + 1;
 
-    // Check if we've completed all steps
-    if (nextStepIndex >= selectedScenario.steps.length) {
-      console.log('All steps completed, finishing session');
-      completeSession();
-      return;
-    }
-
-    const updatedSession = {
-      ...currentSession,
-      currentStep: nextStepIndex,
-      progress: (nextStepIndex / selectedScenario.steps.length) * 100
-    };
-
-    console.log('Updating session to step:', nextStepIndex);
-    setCurrentSession(updatedSession);
-
-    // Reset UI state
-    setShowChoices(false);
-    setWaitingForVoice(false);
-    setCelebrationMode(false);
-    setCurrentFeedback('');
-
-    // Small delay before next step for smooth transition
-    setTimeout(() => {
-      executeStep(updatedSession, nextStepIndex);
-    }, 500);
-  };
 
   const completeSession = async () => {
     console.log('Completing session');
@@ -771,7 +508,7 @@ export default function VoiceTherapy() {
 
     if (currentSession) {
       // Calculate achievements based on performance
-      const achievements = [];
+      const achievements: string[] = [];
       if (currentSession.points >= 100) achievements.push('🏆 Point Master');
       if (currentSession.points >= 150) achievements.push('⭐ Superstar');
       if (currentSession.voiceAnalysis.length >= 2) achievements.push('🎤 Voice Champion');
@@ -786,23 +523,65 @@ export default function VoiceTherapy() {
         achievements
       };
       setCurrentSession(completedSession);
+
+      // Save session to Firestore
+      if (currentUser) {
+        try {
+          const sessionData = {
+            userId: currentUser.uid,
+            startTime: new Date(Date.now() - sessionTime * 1000), // Calculate start time
+            endTime: new Date(),
+            duration: sessionTime,
+            sessionType: 'voice' as const,
+            progressMetrics: {
+              emotionalRegulation: Math.min(100, currentSession.points / 2) / 100,
+              selfAwareness: Math.min(100, currentSession.voiceAnalysis.length * 25) / 100,
+              copingSkillsUsage: Math.min(100, currentSession.userChoices.length * 30) / 100,
+              therapeuticAlliance: 0.8, // Default good alliance for voice therapy
+              engagementLevel: Math.min(100, sessionTime / 180) / 100 // Based on time spent
+            },
+            outcomes: {
+              overallMood: currentSession.points >= 100 ? 'improved' as const : 'stable' as const,
+              goalsAddressed: [currentSession.exercise.title],
+              skillsPracticed: [currentSession.exercise.type],
+              insightsGained: achievements
+            }
+          };
+
+          await firebaseService.saveSession(sessionData);
+          toast.success('Session saved successfully!');
+          console.log('Voice therapy session saved to Firestore');
+
+          // --- NEW: Log this activity ---
+          await firebaseService.logUserActivity(
+            currentUser.uid,
+            'completed_voice_session',
+            {
+              exercise: completedSession.exercise.title,
+              points: completedSession.points,
+              duration: sessionTime,
+              exerciseType: completedSession.exercise.type
+            }
+          );
+          // --- END NEW ---
+        } catch (error) {
+          console.error('Error saving session:', error);
+          toast.error('Failed to save session data');
+        }
+      }
     }
 
     // Show completion message
     setShowCompletion(true);
     setCelebrationMode(true);
 
-    if (voiceAI.isVoiceSupported()) {
-      try {
-        await voiceAI.respondWithVoice(
-          `Wonderful! You've completed your ${currentSession?.exercise.title} session and earned ${currentSession?.points} points! You took control of your journey and that's amazing!`,
-          'en-IN',
-          'supportive',
-          selectedVoice
-        );
-      } catch (error) {
-        console.warn('Completion voice failed:', error);
-      }
+    try {
+      await speakText(
+        `Wonderful! You've completed your ${currentSession?.exercise.title} session and earned ${currentSession?.points} points! You took control of your journey and that's amazing!`,
+        selectedVoice
+      );
+    } catch (error) {
+      console.warn('Completion voice failed:', error);
     }
   };
 
@@ -813,7 +592,9 @@ export default function VoiceTherapy() {
     if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
 
     // Stop any ongoing voice activities
-    voiceAnalysis.stopVoiceAnalysis();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
 
     // Reset all state
     setCurrentSession(null);
@@ -831,9 +612,6 @@ export default function VoiceTherapy() {
     setWaitingForVoice(false);
     setCelebrationMode(false);
     setShowSettings(false);
-    setShowChatMode(false);
-    setChatMessages([]);
-    setIsInChatMode(false);
   };
 
 
@@ -844,47 +622,287 @@ export default function VoiceTherapy() {
 
 
 
+  // Helper function to convert blob to base64
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Remove the data URL prefix to get just the base64 string
+        const base64 = result.split(',')[1];
+        resolve(base64 || '');
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // Initialize Firebase functions
+  const functions = getFunctions();
+  const transcribeAudio = httpsCallable(functions, 'transcribeAudio');
+  const synthesizeSpeech = httpsCallable<{ text: string; languageCode?: string; voiceName?: string; speakingRate?: number; pitch?: number; }, { audioBase64: string }>(functions, 'synthesizeSpeech');
+  // ADD THIS NEW FUNCTION
+  const advanceTherapySession = httpsCallable(functions, 'advanceTherapySession');
+
+  // --- Function to play Base64 Audio using Web Audio API ---
+  const playBase64Audio = async (base64String: string) => {
+    try {
+      // Ensure AudioContext is available
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const audioContext = audioContextRef.current;
+
+      // Resume AudioContext if suspended (required by some browsers)
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      // Stop any currently playing audio
+      if (audioSourceRef.current) {
+        audioSourceRef.current.stop();
+      }
+
+      // Decode the Base64 string to ArrayBuffer
+      const binaryString = window.atob(base64String);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const audioBuffer = await audioContext.decodeAudioData(bytes.buffer);
+
+      // Create an AudioBufferSourceNode
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+
+      // Play the audio
+      setIsPlaying(true);
+      source.start(0);
+      audioSourceRef.current = source;
+
+      // Handle end of playback
+      source.onended = () => {
+        setIsPlaying(false);
+        audioSourceRef.current = null;
+        console.log("Audio playback finished.");
+      };
+    } catch (error) {
+      console.error("Error playing base64 audio:", error);
+      toast.error("Failed to play AI voice response.");
+      setIsPlaying(false); // Ensure state resets on error
+    }
+  };
+
+  // --- Stop voice response function ---
+  const stopVoiceResponse = () => {
+    try {
+      if (audioSourceRef.current) {
+        audioSourceRef.current.stop(); // Stop Web Audio playback
+        console.log("Audio playback stopped by user.");
+      }
+      setIsPlaying(false); // Force state update
+    } catch (error) {
+      console.error("Error stopping audio:", error);
+      setIsPlaying(false);
+    }
+  };
+
+  // --- Unified TTS function (FIXED) ---
+  const speakText = async (text: string, voiceOption?: VoiceOption) => {
+    if (!text.trim()) return;
+
+    try {
+      setIsPlaying(true);
+
+      const voice = voiceOption || selectedVoice;
+      const languageCode = voice.language || 'en-IN';
+      const voiceName = voice.voiceURI || voice.name;
+
+      // --- UPDATED: Get speakingRate ---
+      const speakingRate = voice.rate || 1.0;
+      // --- REMOVED 'pitch' variable ---
+      // const pitch = voice.pitch || 0; // <-- THIS LINE IS REMOVED
+
+      console.log(`Calling synthesizeSpeech with voice: ${voiceName}, lang: ${languageCode}, rate: ${speakingRate}`); // <-- REMOVED pitch from log
+
+      const result = await synthesizeSpeech({
+        text: text,
+        languageCode: languageCode,
+        voiceName: voiceName,
+        speakingRate: speakingRate,
+        // --- REMOVED 'pitch' property ---
+        // pitch: pitch // <-- THIS LINE IS REMOVED
+      });
+
+      const audioBase64 = result.data.audioBase64;
+      if (audioBase64) {
+        console.log("Received synthesized audio, attempting playback...");
+        await playBase64Audio(audioBase64);
+      } else {
+        console.warn("Synthesize speech returned no audio data.");
+        toast.error("Could not generate audio for this message.");
+        setIsPlaying(false);
+      }
+    } catch (error: any) {
+      console.error("Error during TTS call or playback:", error);
+      toast.error(`AI Voice failed: ${error.message || 'Could not synthesize speech'}`);
+      setIsPlaying(false);
+    }
+  };
+
+  const requestMicrophonePermission = async (): Promise<boolean> => {
+    try {
+      // Explicit microphone permission request
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      // Stop the stream immediately - we just needed to check permissions
+      stream.getTracks().forEach(track => track.stop());
+      return true;
+    } catch (error) {
+      console.error('Microphone permission denied:', error);
+
+      // Show user-friendly error message
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          alert('🎤 Microphone access is required for voice therapy. Please enable microphone permissions in your browser settings and try again.');
+        } else if (error.name === 'NotFoundError') {
+          alert('🎤 No microphone found. Please connect a microphone and try again.');
+        } else {
+          alert('🎤 Unable to access microphone. Please check your device settings.');
+        }
+      }
+      return false;
+    }
+  };
+
+  // Chat functionality removed - use /companion route for AI chat
+
   const startListening = async () => {
-    if (!voiceAnalysis.isServiceAvailable()) {
-      // Fallback for when voice analysis isn't available
-      setTimeout(() => {
-        const mockResult: VoiceAnalysisResult = {
-          transcript: "I am feeling confident",
-          confidence: 0.8,
-          language: 'english',
-          emotionalIndicators: { tone: 'happy', intensity: 0.7, valence: 0.6, arousal: 0.5, speechRate: 'normal', volume: 'normal', pitch: 'normal' },
-          linguisticFeatures: { wordCount: 4, sentimentScore: 0.7, complexityScore: 0.5, hesitationMarkers: 0, fillerWords: 0, emotionalWords: ['confident'], culturalExpressions: [] },
-          mentalHealthIndicators: { stressLevel: 0.3, depressionIndicators: [], anxietyIndicators: [], cognitiveLoad: 0.4, emotionalRegulation: 0.8 },
-          culturalContext: { languageMixing: 0, culturalReferences: [], formalityLevel: 0.5, respectMarkers: [] },
-          recommendations: { immediate: ['Keep up the positive energy!'], therapeutic: [], communication: [] }
-        };
-        handleVoiceResponse(mockResult);
-      }, 3000);
+    // First, explicitly request microphone permission
+    const hasPermission = await requestMicrophonePermission();
+    if (!hasPermission) {
       return;
     }
 
+    // *** Determine Language Codes from the SELECTED VOICE ***
+    const sessionLanguage = selectedVoice.language || 'en-IN'; // e.g., 'hi-IN', 'bn-IN', 'en-IN'
+    let languageCode = sessionLanguage;
+    let alternativeLanguageCodes: string[] = [];
+
+    // Set a logical alternative language.
+    // If the selected voice isn't English, add English as a backup.
+    // If the selected voice IS English, add Hindi as a backup.
+    if (languageCode.startsWith('en')) {
+      alternativeLanguageCodes = ['hi-IN'];
+    } else {
+      alternativeLanguageCodes = ['en-IN'];
+    }
+
+    console.log(`STT Language Setup - Selected Voice: ${selectedVoice.name}, Primary: ${languageCode}, Alternatives: [${alternativeLanguageCodes.join(', ')}]`);
+
     try {
       setIsListening(true);
-      await voiceAnalysis.startVoiceAnalysis(
-        (result: VoiceAnalysisResult) => {
-          handleVoiceResponse(result);
-        },
-        {
-          language: 'auto',
-          culturalContext: 'indian',
-          sensitivity: 'medium',
-          realTimeAnalysis: true
+      setInputValue("Listening...");
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
         }
-      );
+      });
+
+      const mimeType = 'audio/webm;codecs=opus';
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorderRef.current.onstop = async () => {
+        console.log('Recording stopped, processing audio for STT...');
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        stream.getTracks().forEach(track => track.stop()); // Stop mic
+
+        if (audioBlob.size === 0) {
+          setIsListening(false);
+          setInputValue("");
+          return;
+        }
+
+        try {
+          setInputValue("Processing voice..."); // Indicate processing
+          const audioBase64 = await blobToBase64(audioBlob);
+
+          console.log(`🎤 STT DEBUG: Calling transcribeAudio`);
+          console.log(`🎤 Selected Voice: ${selectedVoice.name} (${selectedVoice.language})`);
+          console.log(`🎤 Primary Language: ${languageCode}`);
+          console.log(`🎤 Alternative Languages: [${alternativeLanguageCodes.join(', ')}]`);
+
+          const result = await transcribeAudio({
+            audioBytes: audioBase64,
+            languageCode: languageCode,
+            alternativeLanguageCodes: alternativeLanguageCodes,
+            sampleRateHertz: 48000
+          });
+
+          const resultData = result.data as { transcription: string; confidence: number };
+          const transcript = resultData.transcription;
+
+          console.log(`🎤 STT RESULT: "${transcript}" (confidence: ${resultData.confidence})`);
+          console.log(`🎤 Expected language: ${languageCode}`);
+
+          if (transcript) {
+            // NEW: Call the new engine
+            if (currentSession) {
+              const userInput = {
+                type: 'voice',
+                value: transcript, // The 'content' for history
+                transcript: transcript,
+                tone: 'neutral' // TODO: You can add your real tone analysis here
+              };
+              await advanceSession(currentSession, userInput);
+            }
+            setInputValue(transcript);
+          } else {
+            toast.info("Could not understand audio.");
+            setInputValue("");
+          }
+        } catch (sttError: any) {
+          console.error("STT Error:", sttError);
+          toast.error(`Transcription failed: ${sttError.message || 'Unknown STT error'}`);
+          setInputValue("");
+        } finally {
+          setIsListening(false);
+        }
+      };
+
+      mediaRecorderRef.current.start();
+      setIsListening(true);
+      setInputValue("Listening...");
     } catch (error) {
       console.warn('Voice listening failed:', error);
       setIsListening(false);
+      setInputValue("");
+      alert('🎤 Voice analysis failed. Please try again or check your microphone settings.');
     }
   };
 
   const stopListening = () => {
-    if (isListening) {
-      voiceAnalysis.stopVoiceAnalysis();
+    if (isListening && mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop(); // Trigger the onstop handler for transcription
+      // The onstop handler will set isListening = false after processing
+    } else if (isListening) {
+      // Reset listening state if no active recording
       setIsListening(false);
     }
   };
@@ -902,33 +920,35 @@ export default function VoiceTherapy() {
 
       {!currentSession ? (
         // Exercise Selection Screen
-        <div className="p-6 max-w-6xl mx-auto">
+        <div className="p-4 md:p-6 max-w-6xl mx-auto">
           {/* Header */}
-          <div className="text-center mb-12">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mb-6">
-              <Mic className="w-10 h-10 text-white" />
+          <div className="text-center mb-8 md:mb-12">
+            <div className="inline-flex items-center justify-center w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mb-4 md:mb-6">
+              <Mic className="w-8 h-8 md:w-10 md:h-10 text-white" />
             </div>
-            <h1 className="text-4xl font-bold text-gray-900 mb-4">Voice Therapy</h1>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            <h1 className="text-2xl md:text-4xl font-bold text-gray-900 mb-3 md:mb-4">Voice Therapy</h1>
+            <p className="text-base md:text-xl text-gray-600 max-w-2xl mx-auto px-4">
               Choose a guided voice exercise to improve your emotional well-being and self-expression
             </p>
           </div>
 
           {/* WORKING VOICE SELECTION */}
           <div style={{
-            marginBottom: '32px',
+            marginBottom: '24px',
             maxWidth: '1024px',
-            margin: '0 auto 32px auto'
+            margin: '0 auto 24px auto'
           }}>
             <div style={{
               position: 'relative',
               zIndex: 1000,
-              padding: '24px',
+              padding: '16px',
               backgroundColor: 'rgba(255, 255, 255, 0.9)',
               backdropFilter: 'blur(8px)',
               border: '2px solid #c084fc',
               borderRadius: '10px'
-            }}>
+            }}
+              className="md:p-6"
+            >
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-800">Choose Your AI Companion Voice</h3>
                 <button
@@ -970,7 +990,22 @@ export default function VoiceTherapy() {
                     alignItems: 'center',
                     gap: '4px'
                   }}
-                  onClick={() => voiceAI.respondWithVoice("Hello! I'm your AI companion. I'm here to guide you through your voice therapy journey.", 'en-IN', selectedVoice.personality as any, selectedVoice)}
+                  onClick={() => {
+                    const langKey = getLangKey(selectedVoice);
+                    const testMessages = {
+                      en: "Hello! I'm your AI companion. I'm here to guide you through your voice therapy journey.",
+                      hi: "नमस्ते! मैं आपकi AI साथी हूँ। मैं आपकी आवाज़ चिकित्सा यात्रा में आपका मार्गदर्शन करने के लिए यहाँ हूँ।",
+                      mr: "नमस्कार! मी तुमचा AI साथी आहे. मी तुमच्या आवाज थेरपी प्रवासात तुम्हाला मार्गदर्शन करण्यासाठी इथे आहे.",
+                      bn: "হ্যালো! আমি আপনার AI সঙ্গী। আমি আপনার ভয়েস থেরাপি যাত্রায় আপনাকে গাইড করতে এখানে আছি।",
+                      ta: "வணக்கம்! நான் உங்கள் AI துணை. உங்கள் குரல் சிகிச்சை பயணத்தில் உங்களுக்கு வழிகாட்ட நான் இங்கே இருக்கிறேன்.",
+                      te: "హలో! నేను మీ AI సహచరుడిని. మీ వాయిస్ థెరపీ ప్రయాణంలో మీకు మార్గదర్శనం చేయడానికి నేను ఇక్కడ ఉన్నాను.",
+                      gu: "હેલો! હું તમારો AI સાથી છું. હું તમારી વૉઇસ થેરાપી જર્નીમાં તમને માર્ગદર્શન આપવા માટે અહીં છું.",
+                      kn: "ಹಲೋ! ನಾನು ನಿಮ್ಮ AI ಸಹಚರ. ನಿಮ್ಮ ಧ್ವನಿ ಚಿಕಿತ್ಸೆಯ ಪ್ರಯಾಣದಲ್ಲಿ ನಿಮಗೆ ಮಾರ್ಗದರ್ಶನ ನೀಡಲು ನಾನು ಇಲ್ಲಿದ್ದೇನೆ.",
+                      ml: "ഹലോ! ഞാൻ നിങ്ങളുടെ AI കൂട്ടാളിയാണ്. നിങ്ങളുടെ വോയ്‌സ് തെറാപ്പി യാത്രയിൽ നിങ്ങളെ നയിക്കാൻ ഞാൻ ഇവിടെയുണ്ട്."
+                    };
+                    const testMessage = testMessages[langKey] || testMessages['en'];
+                    speakText(testMessage, selectedVoice);
+                  }}
                 >
                   <Play className="w-4 h-4" />
                   Test Voice
@@ -1011,10 +1046,11 @@ export default function VoiceTherapy() {
                           e.currentTarget.style.boxShadow = 'none';
                         }
                       }}
-                      onClick={() => {
+                      onClick={async () => {
                         console.log('Voice selected:', voice.name);
                         setSelectedVoice(voice);
-                        voiceAI.setVoice(voice);
+
+                        await saveVoicePreference(voice);
                       }}
                     >
                       <div style={{
@@ -1087,9 +1123,11 @@ export default function VoiceTherapy() {
                   e.currentTarget.style.transform = 'translateY(0)';
                   e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1)';
                 }}
-                onClick={() => {
+                onClick={async () => {
                   console.log('Exercise selected:', exercise.title);
-                  exercise.scenarios[0] && startSession(exercise, exercise.scenarios[0]);
+                  if (exercise.scenarios[0]) {
+                    await startSession(exercise, exercise.scenarios[0]);
+                  }
                 }}
               >
                 <div className={`h-2 bg-gradient-to-r ${exercise.color}`}></div>
@@ -1153,7 +1191,11 @@ export default function VoiceTherapy() {
                     }}
                     onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
                     onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
-                    onClick={() => exercise.scenarios[0] && startSession(exercise, exercise.scenarios[0])}
+                    onClick={async () => {
+                      if (exercise.scenarios[0]) {
+                        await startSession(exercise, exercise.scenarios[0]);
+                      }
+                    }}
                   >
                     <Play className="w-4 h-4" />
                     Start Session
@@ -1226,8 +1268,8 @@ export default function VoiceTherapy() {
                 <div className="text-sm text-gray-500">Voice Samples</div>
               </div>
               <div className="text-center">
-                <div className="text-3xl font-bold text-orange-600">{currentSession.scenario.steps.length}</div>
-                <div className="text-sm text-gray-500">Steps Mastered</div>
+                <div className="text-3xl font-bold text-orange-600">{currentSession.currentStep}</div>
+                <div className="text-sm text-gray-500">Steps Completed</div>
               </div>
             </div>
 
@@ -1247,7 +1289,7 @@ export default function VoiceTherapy() {
                   <h4 className="font-semibold text-green-800 mb-2">🌟 Your Strengths</h4>
                   <ul className="text-sm text-green-700 space-y-1">
                     <li>• {getPersonalizedStrength()}</li>
-                    <li>• Completed {currentSession.scenario.steps.length} challenging steps</li>
+                    <li>• Completed {currentSession.currentStep} AI-generated steps</li>
                     <li>• Showed courage by using your voice</li>
                   </ul>
                 </div>
@@ -1568,10 +1610,11 @@ export default function VoiceTherapy() {
                               e.currentTarget.style.backgroundColor = '#fff';
                             }
                           }}
-                          onClick={() => {
+                          onClick={async () => {
                             console.log('Voice selected in settings:', voice.name);
                             setSelectedVoice(voice);
-                            voiceAI.setVoice(voice);
+
+                            await saveVoicePreference(voice);
                           }}
                         >
                           <div style={{
@@ -1627,7 +1670,20 @@ export default function VoiceTherapy() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 console.log('Testing voice:', voice.name);
-                                voiceAI.respondWithVoice("Hello! This is how I sound.", 'en-IN', voice.personality as any, voice);
+                                const langKey = voice.language.split('-')[0] || 'en';
+                                const testMessages = {
+                                  en: "Hello! This is how I sound.",
+                                  hi: "नमस्ते! मैं इस तरह बोलता हूँ।",
+                                  mr: "नमस्कार! मी असा बोलतो.",
+                                  bn: "হ্যালো! আমি এভাবে কথা বলি।",
+                                  ta: "வணக்கம்! நான் இப்படித்தான் பேசுகிறேன்.",
+                                  te: "హలో! నేను ఇలా మాట్లాడతాను.",
+                                  gu: "હેલો! હું આ રીતે બોલું છું.",
+                                  kn: "ಹಲೋ! ನಾನು ಈ ರೀತಿ ಮಾತನಾಡುತ್ತೇನೆ.",
+                                  ml: "ഹലോ! ഞാൻ ഇങ്ങനെയാണ് സംസാരിക്കുന്നത്."
+                                };
+                                const testMessage = testMessages[langKey] || testMessages['en'];
+                                speakText(testMessage, voice);
                               }}
                             >
                               Test
@@ -1687,9 +1743,8 @@ export default function VoiceTherapy() {
                               fontSize: '12px'
                             }}
                             onClick={() => {
-                              const currentStep = selectedScenario?.steps[currentSession.currentStep];
                               if (currentStep?.voiceGuide) {
-                                voiceAI.respondWithVoice(currentStep.voiceGuide, 'en-IN', selectedVoice.personality as any, selectedVoice);
+                                speakText(currentStep.voiceGuide, selectedVoice);
                               }
                             }}
                           >
@@ -1712,7 +1767,7 @@ export default function VoiceTherapy() {
             <div className="mb-6">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-medium text-gray-700">
-                  Step {currentSession.currentStep + 1} of {currentSession.scenario.steps.length}
+                  AI-Powered Session - Step {currentSession.currentStep + 1}
                 </span>
                 <div className="flex items-center gap-4">
                   <span className="text-sm text-gray-500">{formatTime(sessionTime)}</span>
@@ -1779,26 +1834,7 @@ export default function VoiceTherapy() {
                   {isPaused ? '▶️ Resume Session' : '⏸️ Pause Session'}
                 </button>
 
-                <button
-                  style={{
-                    padding: '12px 20px',
-                    backgroundColor: '#6f42c1',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500'
-                  }}
-                  onClick={() => {
-                    console.log('Chat button clicked, isInChatMode:', isInChatMode);
-                    setIsInChatMode(!isInChatMode);
-                    setShowChatMode(!showChatMode);
-                    console.log('Chat mode toggled to:', !isInChatMode);
-                  }}
-                >
-                  💬 {isInChatMode ? 'Exit Chat' : 'Chat with AI'}
-                </button>
+                {/* Chat button removed - use /companion route for AI chat */}
 
                 <button
                   style={{
@@ -1813,10 +1849,9 @@ export default function VoiceTherapy() {
                   }}
                   onClick={() => {
                     console.log('Repeat instructions clicked');
-                    const currentStep = selectedScenario?.steps[currentSession.currentStep];
                     if (currentStep?.voiceGuide) {
                       setIsPlaying(true);
-                      voiceAI.respondWithVoice(currentStep.voiceGuide, 'en-IN', selectedVoice.personality as any, selectedVoice)
+                      speakText(currentStep.voiceGuide, selectedVoice)
                         .finally(() => setIsPlaying(false));
                     }
                   }}
@@ -1854,227 +1889,25 @@ export default function VoiceTherapy() {
                   padding: '8px 12px',
                   borderRadius: '6px',
                   fontSize: '12px',
-                  backgroundColor: isPaused ? '#fff3cd' : isInChatMode ? '#e2e3f3' : '#d4edda',
-                  color: isPaused ? '#856404' : isInChatMode ? '#383d41' : '#155724'
+                  backgroundColor: isPaused ? '#fff3cd' : '#d4edda',
+                  color: isPaused ? '#856404' : '#155724'
                 }}>
                   <div style={{
                     width: '8px',
                     height: '8px',
                     borderRadius: '50%',
-                    backgroundColor: isPaused ? '#ffc107' : isInChatMode ? '#6f42c1' : '#28a745'
+                    backgroundColor: isPaused ? '#ffc107' : '#28a745'
                   }}></div>
-                  {isPaused ? 'Paused' : isInChatMode ? 'Chatting' : 'Active'}
+                  {isPaused ? 'Paused' : 'Active'}
                 </div>
               </div>
 
               <div style={{ marginTop: '15px', fontSize: '12px', color: '#6c757d' }}>
-                Status: isPaused={isPaused.toString()}, isInChatMode={isInChatMode.toString()}, autoPlayVoice={autoPlayVoice.toString()}
+                Status: isPaused={isPaused.toString()}, autoPlayVoice={autoPlayVoice.toString()}
               </div>
             </div>
 
-            {/* WORKING CHAT MODE INTERFACE */}
-            {showChatMode && (
-              <div style={{
-                position: 'relative',
-                zIndex: 1000,
-                padding: '24px',
-                marginBottom: '24px',
-                backgroundColor: '#faf5ff',
-                border: '2px solid #c084fc',
-                borderRadius: '10px'
-              }}>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-purple-800 flex items-center gap-2">
-                    💬 Chat with {selectedVoice.name}
-                  </h3>
-                  <button
-                    style={{
-                      padding: '6px 12px',
-                      backgroundColor: '#fff',
-                      color: '#6f42c1',
-                      border: '1px solid #d1a7f0',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '12px'
-                    }}
-                    onClick={() => {
-                      setIsInChatMode(false);
-                      setShowChatMode(false);
-                    }}
-                  >
-                    ✕ Close Chat
-                  </button>
-                </div>
-
-                {/* Chat Messages */}
-                <div className="max-h-60 overflow-y-auto mb-4 space-y-3 bg-white rounded-lg p-4 border">
-                  {chatMessages.map((msg, index) => (
-                    <div key={index} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-xs px-4 py-2 rounded-lg ${msg.type === 'user'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-purple-100 text-purple-800 border border-purple-200'
-                        }`}>
-                        <p className="text-sm">{msg.message}</p>
-                        <p className="text-xs opacity-70 mt-1">
-                          {msg.timestamp.toLocaleTimeString()}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Chat Voice Input */}
-                <div className="flex items-center gap-3">
-                  <button
-                    style={{
-                      padding: '12px 20px',
-                      backgroundColor: isListening ? '#dc3545' : '#6f42c1',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      opacity: isPlaying ? 0.5 : 1
-                    }}
-                    onClick={() => {
-                      if (isListening) {
-                        stopListening();
-                      } else {
-                        setIsListening(true);
-                        voiceAnalysis.startVoiceAnalysis(
-                          async (result) => {
-                            // Handle chat voice input with full personalization
-                            const userMessage = result.transcript;
-
-                            // Comprehensive preference and personality detection
-                            personalizedTherapy.detectPreferenceChanges(userMessage);
-
-                            // Add user message to chat
-                            setChatMessages(prev => [...prev, {
-                              type: 'user',
-                              message: userMessage,
-                              timestamp: new Date()
-                            }]);
-
-                            // Generate personalized AI response
-                            try {
-                              let aiResponse = await generatePersonalizedTherapyResponse(
-                                userMessage, 
-                                personalizedTherapy.getProfile()
-                              );
-                              
-                              // Simple processing - just remove unwanted terms
-                              aiResponse = aiResponse.replace(/many young people in india/gi, '')
-                                                   .replace(/similar pressures/gi, '')
-                                                   .replace(/beta/gi, '')
-                                                   .replace(/yaar/gi, '')
-                                                   .trim();
-                              
-                              // Record the complete conversation for learning
-                              personalizedTherapy.recordConversation(
-                                userMessage, 
-                                aiResponse, 
-                                'neutral' // Emotion analysis is handled internally
-                              );
-                              
-                              console.log('Generated personalized AI response:', aiResponse);
-
-                              // Add AI response to chat
-                              setChatMessages(prev => [...prev, {
-                                type: 'ai',
-                                message: aiResponse,
-                                timestamp: new Date()
-                              }]);
-
-                              // Speak the response in English
-                              if (autoPlayVoice) {
-                                voiceAI.respondWithVoice(aiResponse, 'en-IN', selectedVoice.personality as any, selectedVoice);
-                              }
-                            } catch (error) {
-                              console.error('AI response error:', error);
-                              // English fallback response
-                              const fallbackResponse = "I understand you're sharing something important with me. Can you tell me more about how you're feeling? I'm here to listen and support you.";
-                              
-                              setChatMessages(prev => [...prev, {
-                                type: 'ai',
-                                message: fallbackResponse,
-                                timestamp: new Date()
-                              }]);
-
-                              if (autoPlayVoice) {
-                                voiceAI.respondWithVoice(fallbackResponse, 'en-IN', selectedVoice.personality as any, selectedVoice);
-                              }
-                            }
-
-                            setIsListening(false);
-                          },
-                          { language: 'auto', culturalContext: 'therapy', sensitivity: 'medium' }
-                        ).catch((error: string) => {
-                          console.error('Chat voice error:', error);
-                          setIsListening(false);
-                        });
-                      }
-                    }}
-                    disabled={isPlaying}
-                  >
-                    {isListening ? (
-                      <>
-                        <MicOff className="w-4 h-4" />
-                        Stop Talking
-                      </>
-                    ) : (
-                      <>
-                        <Mic className="w-4 h-4" />
-                        Talk to AI
-                      </>
-                    )}
-                  </button>
-
-                  <div className="flex-1 text-sm text-purple-700">
-                    {isListening ? (
-                      <span className="animate-pulse">🎤 Listening... speak freely!</span>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span>Click "Talk to AI" to have a conversation anytime during your session</span>
-                        {personalizedTherapy.getProfile().responseLength === 'short' && (
-                          <span style={{
-                            backgroundColor: '#10b981',
-                            color: 'white',
-                            padding: '2px 8px',
-                            borderRadius: '12px',
-                            fontSize: '11px',
-                            fontWeight: 'bold'
-                          }}>
-                            SHORT MODE ✓
-                          </span>
-                        )}
-                        <button
-                          style={{
-                            backgroundColor: '#ef4444',
-                            color: 'white',
-                            padding: '2px 8px',
-                            borderRadius: '12px',
-                            fontSize: '11px',
-                            fontWeight: 'bold',
-                            border: 'none',
-                            cursor: 'pointer'
-                          }}
-                          onClick={() => {
-                            personalizedTherapy.resetProfile();
-                            console.log('🔄 AI memory reset!');
-                          }}
-                        >
-                          RESET AI
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Chat functionality removed - use /companion route for AI chat */}
           </div>
 
           {/* WORKING CURRENT STEP */}
@@ -2090,7 +1923,7 @@ export default function VoiceTherapy() {
           }}>
             <div className="text-center">
               <h2 className="text-2xl font-semibold text-gray-900 mb-6">
-                {currentSession.scenario.steps[currentSession.currentStep]?.instruction}
+                {currentStep?.instruction || 'Loading next step...'}
               </h2>
 
               {/* Step Progress Circle */}
@@ -2141,8 +1974,10 @@ export default function VoiceTherapy() {
               {/* Debug Info */}
               <div className="mb-4 p-3 bg-gray-100 rounded-lg text-xs text-gray-600">
                 <p>Debug: isPaused={isPaused.toString()}, showChoices={showChoices.toString()}, waitingForVoice={waitingForVoice.toString()}</p>
-                <p>Current Step: {currentSession.currentStep + 1}/{selectedScenario?.steps.length || 0}</p>
+                <p>Current Step: {currentSession.currentStep + 1} | AI-Powered Session</p>
                 <p>Points: {currentSession.points}</p>
+                <p>🌍 Language: {getLangKey(selectedVoice)} | Voice: {selectedVoice.name} ({selectedVoice.language})</p>
+                <p>🎤 Current Step Type: {currentStep?.type || 'None'} | AI Generated: {currentStep ? 'Yes' : 'No'}</p>
               </div>
 
               {/* WORKING CHOICE BUTTONS */}
@@ -2166,7 +2001,7 @@ export default function VoiceTherapy() {
                     gap: '15px',
                     marginBottom: '15px'
                   }}>
-                    {selectedScenario.steps[currentSession.currentStep]?.choices?.map((choice) => (
+                    {currentStep?.choices?.map((choice) => (
                       <button
                         key={choice.id}
                         style={{
@@ -2195,43 +2030,25 @@ export default function VoiceTherapy() {
                           e.currentTarget.style.transform = 'scale(1)';
                         }}
                         onClick={() => {
-                          console.log('Choice clicked:', choice.text, 'Points:', choice.points);
+                          if (!currentSession) return;
 
-                          if (!currentSession) {
-                            console.log('No current session for choice handling');
-                            return;
-                          }
+                          const userInput = {
+                            type: 'choice',
+                            value: choice.text // The 'content' for history
+                          };
 
-                          // Handle choice immediately
-                          setCelebrationMode(true);
+                          // Hide choices immediately for a snappy feel
                           setShowChoices(false);
 
-                          // Add points and choice to session
-                          const updatedSession = {
-                            ...currentSession,
-                            points: currentSession.points + choice.points,
-                            userChoices: [...currentSession.userChoices, choice.id]
-                          };
-                          setCurrentSession(updatedSession);
-
-                          // Show feedback
-                          const feedbackMessage = `${choice.response} (+${choice.points} points!)`;
-                          setCurrentFeedback(feedbackMessage);
-
-                          // Speak the response if enabled
-                          if (voiceAI.isVoiceSupported() && autoPlayVoice && !isPaused) {
-                            setIsPlaying(true);
-                            voiceAI.respondWithVoice(choice.response, 'en-IN', selectedVoice.personality as any, selectedVoice)
-                              .finally(() => setIsPlaying(false));
-                          }
-
-                          setCelebrationMode(false);
-                          console.log('Choice handling complete, points added:', choice.points);
+                          // Call the new engine
+                          advanceSession(currentSession, userInput);
                         }}
                         disabled={isPlaying}
                       >
                         <span style={{ fontSize: '36px' }}>{choice.emoji}</span>
-                        <span style={{ fontSize: '16px', fontWeight: '500', color: '#333' }}>{choice.text}</span>
+                        <span style={{ fontSize: '16px', fontWeight: '500', color: '#333' }}>
+                          {choice.text}
+                        </span>
                         <span style={{ fontSize: '12px', color: '#6c757d' }}>+{choice.points} points</span>
                       </button>
                     ))}
@@ -2315,10 +2132,7 @@ export default function VoiceTherapy() {
                     marginBottom: '16px',
                     fontSize: '16px'
                   }}>
-                    {selectedScenario?.steps[currentSession.currentStep]?.expectedResponse ?
-                      `Try saying: "${selectedScenario.steps[currentSession.currentStep]?.expectedResponse}"` :
-                      'Express yourself freely and let your voice be heard!'
-                    }
+                    {currentStep?.instruction || 'Express yourself freely and let your voice be heard!'}
                   </p>
 
                   <div style={{
@@ -2382,15 +2196,8 @@ export default function VoiceTherapy() {
                         opacity: isPlaying ? 0.5 : 1
                       }}
                       onClick={() => {
-                        const currentStep = selectedScenario?.steps[currentSession.currentStep];
                         if (currentStep?.voiceGuide) {
-                          setIsPlaying(true);
-                          voiceAI.respondWithVoice(
-                            currentStep.voiceGuide,
-                            'en-IN',
-                            selectedVoice.personality as any,
-                            selectedVoice
-                          ).finally(() => setIsPlaying(false));
+                          speakText(currentStep.voiceGuide, selectedVoice);
                         }
                       }}
                       disabled={isPlaying}
@@ -2416,6 +2223,158 @@ export default function VoiceTherapy() {
                     </div>
                   )}
 
+                  {/* Rich Voice Analysis Visualization */}
+                  {voiceAnalysisResults.length > 0 && (
+                    <div style={{
+                      maxWidth: '600px',
+                      margin: '0 auto 20px auto',
+                      padding: '20px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '12px',
+                      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                    }}>
+                      {(() => {
+                        const latestAnalysis = voiceAnalysisResults[voiceAnalysisResults.length - 1];
+                        if (!latestAnalysis) return null;
+
+                        const { emotionalIndicators, mentalHealthIndicators, linguisticFeatures } = latestAnalysis;
+
+                        return (
+                          <>
+                            <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#374151', marginBottom: '16px', textAlign: 'center' }}>
+                              🎤 Voice Analysis Insights
+                            </h3>
+
+                            {/* Emotional Indicators */}
+                            <div style={{ marginBottom: '16px' }}>
+                              <h4 style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280', marginBottom: '8px' }}>Emotional State</h4>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
+                                <div style={{ padding: '8px', backgroundColor: '#fef3c7', borderRadius: '6px', textAlign: 'center' }}>
+                                  <div style={{ fontSize: '18px' }}>
+                                    {emotionalIndicators.tone === 'happy' ? '😊' :
+                                      emotionalIndicators.tone === 'calm' ? '😌' :
+                                        emotionalIndicators.tone === 'stressed' ? '😰' :
+                                          emotionalIndicators.tone === 'anxious' ? '😟' :
+                                            emotionalIndicators.tone === 'sad' ? '😢' : '😐'}
+                                  </div>
+                                  <div style={{ fontSize: '12px', fontWeight: '500', color: '#92400e', textTransform: 'capitalize' }}>
+                                    {emotionalIndicators.tone}
+                                  </div>
+                                </div>
+                                <div style={{ padding: '8px', backgroundColor: '#dbeafe', borderRadius: '6px', textAlign: 'center' }}>
+                                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#1e40af' }}>
+                                    {Math.round(emotionalIndicators.intensity * 100)}%
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#3730a3' }}>Intensity</div>
+                                </div>
+                                <div style={{ padding: '8px', backgroundColor: '#dcfce7', borderRadius: '6px', textAlign: 'center' }}>
+                                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#166534', textTransform: 'capitalize' }}>
+                                    {emotionalIndicators.speechRate}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#15803d' }}>Speech Rate</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Mental Health Indicators */}
+                            <div style={{ marginBottom: '16px' }}>
+                              <h4 style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280', marginBottom: '8px' }}>Wellness Indicators</h4>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px' }}>
+                                <div style={{ padding: '8px', backgroundColor: '#fef2f2', borderRadius: '6px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '12px', color: '#7f1d1d' }}>Stress Level</span>
+                                    <span style={{ fontSize: '14px', fontWeight: '600', color: '#dc2626' }}>
+                                      {Math.round(mentalHealthIndicators.stressLevel * 100)}%
+                                    </span>
+                                  </div>
+                                  <div style={{
+                                    width: '100%',
+                                    height: '4px',
+                                    backgroundColor: '#fee2e2',
+                                    borderRadius: '2px',
+                                    marginTop: '4px',
+                                    overflow: 'hidden'
+                                  }}>
+                                    <div style={{
+                                      width: `${mentalHealthIndicators.stressLevel * 100}%`,
+                                      height: '100%',
+                                      backgroundColor: mentalHealthIndicators.stressLevel > 0.7 ? '#dc2626' :
+                                        mentalHealthIndicators.stressLevel > 0.4 ? '#f59e0b' : '#10b981',
+                                      transition: 'width 0.3s ease'
+                                    }}></div>
+                                  </div>
+                                </div>
+                                <div style={{ padding: '8px', backgroundColor: '#f0f9ff', borderRadius: '6px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '12px', color: '#1e40af' }}>Emotional Regulation</span>
+                                    <span style={{ fontSize: '14px', fontWeight: '600', color: '#2563eb' }}>
+                                      {Math.round(mentalHealthIndicators.emotionalRegulation * 100)}%
+                                    </span>
+                                  </div>
+                                  <div style={{
+                                    width: '100%',
+                                    height: '4px',
+                                    backgroundColor: '#dbeafe',
+                                    borderRadius: '2px',
+                                    marginTop: '4px',
+                                    overflow: 'hidden'
+                                  }}>
+                                    <div style={{
+                                      width: `${mentalHealthIndicators.emotionalRegulation * 100}%`,
+                                      height: '100%',
+                                      backgroundColor: '#2563eb',
+                                      transition: 'width 0.3s ease'
+                                    }}></div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Linguistic Features */}
+                            {linguisticFeatures.emotionalWords.length > 0 && (
+                              <div style={{ marginBottom: '12px' }}>
+                                <h4 style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280', marginBottom: '8px' }}>Emotional Expression</h4>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                  {linguisticFeatures.emotionalWords.slice(0, 5).map((word, index) => (
+                                    <span key={index} style={{
+                                      padding: '4px 8px',
+                                      backgroundColor: '#ecfdf5',
+                                      color: '#065f46',
+                                      fontSize: '12px',
+                                      fontWeight: '500',
+                                      borderRadius: '12px',
+                                      border: '1px solid #a7f3d0'
+                                    }}>
+                                      {word}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Recommendations */}
+                            {latestAnalysis.recommendations.immediate.length > 0 && (
+                              <div style={{
+                                padding: '12px',
+                                backgroundColor: '#f0fdf4',
+                                borderRadius: '8px',
+                                border: '1px solid #bbf7d0'
+                              }}>
+                                <h4 style={{ fontSize: '14px', fontWeight: '500', color: '#166534', marginBottom: '6px' }}>
+                                  💡 Personalized Insights
+                                </h4>
+                                <p style={{ fontSize: '13px', color: '#15803d', lineHeight: '1.4' }}>
+                                  {latestAnalysis.recommendations.immediate[0]}
+                                </p>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', justifyContent: 'center' }}>
                     <button
                       style={{
@@ -2435,31 +2394,13 @@ export default function VoiceTherapy() {
                       }}
                       onClick={() => {
                         console.log('Skip This Step button clicked');
-                        if (!currentSession || !selectedScenario) return;
+                        if (!currentSession) return;
 
-                        const nextStepIndex = currentSession.currentStep + 1;
-                        if (nextStepIndex >= selectedScenario.steps.length) {
-                          setIsActive(false);
-                          setShowCompletion(true);
-                          return;
-                        }
-
-                        const updatedSession = {
-                          ...currentSession,
-                          currentStep: nextStepIndex,
-                          progress: (nextStepIndex / selectedScenario.steps.length) * 100
+                        const userInput = {
+                          type: 'skip',
+                          value: 'User requested to skip this step'
                         };
-                        setCurrentSession(updatedSession);
-                        setShowChoices(false);
-                        setWaitingForVoice(false);
-                        setCurrentFeedback('');
-
-                        const step = selectedScenario.steps[nextStepIndex];
-                        if (step?.type === 'choice') {
-                          setShowChoices(true);
-                        } else if (step?.type === 'voice') {
-                          setWaitingForVoice(true);
-                        }
+                        advanceSession(currentSession, userInput);
                       }}
                       disabled={isPlaying}
                     >
@@ -2505,7 +2446,7 @@ export default function VoiceTherapy() {
               )}
 
               {/* WORKING BREATHING EXERCISE */}
-              {selectedScenario?.steps[currentSession.currentStep]?.type === 'breathing' && !showChoices && !waitingForVoice && !isPaused && (
+              {currentStep?.type === 'breathing' && !showChoices && !waitingForVoice && !isPaused && (
                 <div style={{
                   position: 'relative',
                   zIndex: 1000,
@@ -2564,8 +2505,7 @@ export default function VoiceTherapy() {
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#28a745'}
                       onClick={() => {
                         console.log('Start Breathing Exercise button clicked!');
-                        const step = selectedScenario?.steps[currentSession.currentStep];
-                        if (step) {
+                        if (currentStep) {
                           setWaitingForVoice(false);
                           setShowChoices(false);
                           setCelebrationMode(true);
@@ -2573,17 +2513,17 @@ export default function VoiceTherapy() {
                           if (currentSession) {
                             const updatedSession = {
                               ...currentSession,
-                              points: currentSession.points + (step.points || 20)
+                              points: currentSession.points + (currentStep.points || 20)
                             };
                             setCurrentSession(updatedSession);
                           }
 
                           const breathingGuide = "Let's breathe together. Inhale slowly for 4 counts... hold for 4... and exhale for 6. Take your time and breathe at your own pace.";
-                          setCurrentFeedback(`${breathingGuide} (+${step.points || 20} points!)`);
+                          setCurrentFeedback(`${breathingGuide} (+${currentStep.points || 20} points!)`);
 
-                          if (voiceAI.isVoiceSupported() && autoPlayVoice) {
+                          if (autoPlayVoice) {
                             setIsPlaying(true);
-                            voiceAI.respondWithVoice(breathingGuide, 'en-IN', 'calm' as any, selectedVoice)
+                            speakText(breathingGuide, selectedVoice)
                               .finally(() => setIsPlaying(false));
                           }
 
@@ -2610,15 +2550,9 @@ export default function VoiceTherapy() {
                         opacity: isPlaying ? 0.5 : 1
                       }}
                       onClick={() => {
-                        const currentStep = selectedScenario?.steps[currentSession.currentStep];
                         if (currentStep?.voiceGuide) {
                           setIsPlaying(true);
-                          voiceAI.respondWithVoice(
-                            currentStep.voiceGuide,
-                            'en-IN',
-                            'calm' as any,
-                            selectedVoice
-                          ).finally(() => setIsPlaying(false));
+                          speakText(currentStep.voiceGuide, selectedVoice);
                         }
                       }}
                       disabled={isPlaying}
@@ -2631,7 +2565,7 @@ export default function VoiceTherapy() {
               )}
 
               {/* WORKING STEP NAVIGATION */}
-              {!showChoices && !waitingForVoice && selectedScenario?.steps[currentSession.currentStep]?.type !== 'breathing' && !isPaused && (
+              {!showChoices && !waitingForVoice && currentStep?.type !== 'breathing' && !isPaused && (
                 <div style={{
                   position: 'relative',
                   zIndex: 1000,
@@ -2677,68 +2611,20 @@ export default function VoiceTherapy() {
                     onClick={() => {
                       console.log('Next Step button clicked');
 
-                      if (!currentSession || !selectedScenario) {
-                        console.log('Cannot proceed: missing session or scenario');
+                      if (!currentSession) {
+                        console.log('Cannot proceed: missing session');
                         return;
                       }
 
-                      const nextStepIndex = currentSession.currentStep + 1;
-
-                      // Check if we've completed all steps
-                      if (nextStepIndex >= selectedScenario.steps.length) {
-                        console.log('All steps completed, finishing session');
-                        setIsActive(false);
-                        setShowCompletion(true);
-                        return;
-                      }
-
-                      // Update session
-                      const updatedSession = {
-                        ...currentSession,
-                        currentStep: nextStepIndex,
-                        progress: (nextStepIndex / selectedScenario.steps.length) * 100
+                      const userInput = {
+                        type: 'continue',
+                        value: 'User requested next step'
                       };
-
-                      console.log('Updating session to step:', nextStepIndex);
-                      setCurrentSession(updatedSession);
-
-                      // Reset UI state
-                      setShowChoices(false);
-                      setWaitingForVoice(false);
-                      setCelebrationMode(false);
-                      setCurrentFeedback('');
-
-                      // Execute next step
-                      setTimeout(() => {
-                        const step = selectedScenario.steps[nextStepIndex];
-                        if (step) {
-                          console.log(`Executing step ${nextStepIndex + 1}: ${step.title}`);
-
-                          // Handle different step types
-                          if (step.type === 'choice') {
-                            setShowChoices(true);
-                            setCurrentFeedback("Choose one of the options below to continue:");
-                          } else if (step.type === 'voice') {
-                            setWaitingForVoice(true);
-                            setCurrentFeedback("Click 'Start Speaking' when you're ready to use your voice:");
-                          } else if (step.type === 'breathing') {
-                            setCurrentFeedback("Take your time with this breathing exercise. Click 'Start' when ready:");
-                          } else {
-                            setCurrentFeedback("Read the instruction above and click 'Continue' when you're ready:");
-                          }
-
-                          // Speak voice guide if enabled
-                          if (autoPlayVoice && voiceAI.isVoiceSupported() && !isPaused) {
-                            setIsPlaying(true);
-                            voiceAI.respondWithVoice(step.voiceGuide, 'en-IN', selectedVoice.personality as any, selectedVoice)
-                              .finally(() => setIsPlaying(false));
-                          }
-                        }
-                      }, 500);
+                      advanceSession(currentSession, userInput);
                     }}
                   >
                     <ArrowRight className="w-4 h-4" />
-                    {currentSession.currentStep + 1 >= currentSession.scenario.steps.length ? 'Complete Session' : 'Next Step'}
+                    Next Step
                   </button>
                   <button
                     style={{
@@ -2761,7 +2647,7 @@ export default function VoiceTherapy() {
 
                       if (currentSession) {
                         // Calculate achievements
-                        const achievements = [];
+                        const achievements: string[] = [];
                         if (currentSession.points >= 100) achievements.push('🏆 Point Master');
                         if (currentSession.points >= 150) achievements.push('⭐ Superstar');
                         if (currentSession.voiceAnalysis.length >= 2) achievements.push('🎤 Voice Champion');
@@ -2781,11 +2667,9 @@ export default function VoiceTherapy() {
                       setShowCompletion(true);
                       setCelebrationMode(true);
 
-                      if (voiceAI.isVoiceSupported() && autoPlayVoice) {
-                        voiceAI.respondWithVoice(
+                      if (autoPlayVoice) {
+                        speakText(
                           `Wonderful! You've completed your session and earned ${currentSession?.points || 0} points! You took control of your journey and that's amazing!`,
-                          'en-IN',
-                          selectedVoice.personality as any,
                           selectedVoice
                         );
                       }
@@ -2798,7 +2682,7 @@ export default function VoiceTherapy() {
               )}
 
               {/* WORKING CONTINUE BUTTON */}
-              {(showChoices || waitingForVoice || selectedScenario?.steps[currentSession.currentStep]?.type === 'breathing') && !isPaused && (
+              {(showChoices || waitingForVoice || currentStep?.type === 'breathing') && !isPaused && (
                 <div style={{
                   display: 'flex',
                   justifyContent: 'center',
@@ -2822,64 +2706,16 @@ export default function VoiceTherapy() {
                     onClick={() => {
                       console.log('Continue to Next Step button clicked');
 
-                      if (!currentSession || !selectedScenario) {
-                        console.log('Cannot proceed: missing session or scenario');
+                      if (!currentSession) {
+                        console.log('Cannot proceed: missing session');
                         return;
                       }
 
-                      const nextStepIndex = currentSession.currentStep + 1;
-
-                      // Check if we've completed all steps
-                      if (nextStepIndex >= selectedScenario.steps.length) {
-                        console.log('All steps completed, finishing session');
-                        setIsActive(false);
-                        setShowCompletion(true);
-                        return;
-                      }
-
-                      // Update session
-                      const updatedSession = {
-                        ...currentSession,
-                        currentStep: nextStepIndex,
-                        progress: (nextStepIndex / selectedScenario.steps.length) * 100
+                      const userInput = {
+                        type: 'continue',
+                        value: 'User requested to continue to next step'
                       };
-
-                      console.log('Updating session to step:', nextStepIndex);
-                      setCurrentSession(updatedSession);
-
-                      // Reset UI state
-                      setShowChoices(false);
-                      setWaitingForVoice(false);
-                      setCelebrationMode(false);
-                      setCurrentFeedback('');
-
-                      // Execute next step
-                      setTimeout(() => {
-                        const step = selectedScenario.steps[nextStepIndex];
-                        if (step) {
-                          console.log(`Executing step ${nextStepIndex + 1}: ${step.title}`);
-
-                          // Handle different step types
-                          if (step.type === 'choice') {
-                            setShowChoices(true);
-                            setCurrentFeedback("Choose one of the options below to continue:");
-                          } else if (step.type === 'voice') {
-                            setWaitingForVoice(true);
-                            setCurrentFeedback("Click 'Start Speaking' when you're ready to use your voice:");
-                          } else if (step.type === 'breathing') {
-                            setCurrentFeedback("Take your time with this breathing exercise. Click 'Start' when ready:");
-                          } else {
-                            setCurrentFeedback("Read the instruction above and click 'Continue' when you're ready:");
-                          }
-
-                          // Speak voice guide if enabled
-                          if (autoPlayVoice && voiceAI.isVoiceSupported() && !isPaused) {
-                            setIsPlaying(true);
-                            voiceAI.respondWithVoice(step.voiceGuide, 'en-IN', selectedVoice.personality as any, selectedVoice)
-                              .finally(() => setIsPlaying(false));
-                          }
-                        }
-                      }, 500);
+                      advanceSession(currentSession, userInput);
                     }}
                   >
                     <ArrowRight className="w-4 h-4" />

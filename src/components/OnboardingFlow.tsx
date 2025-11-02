@@ -47,7 +47,18 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const languages = [
     { id: 'english', label: 'English' },
     { id: 'hindi', label: 'हिंदी' },
-    { id: 'mixed', label: 'Hinglish (मिश्रित)' }
+    { id: 'mixed', label: 'Hinglish (मिश्रित)' },
+    { id: 'bengali', label: 'বাংলা (Bengali)' },
+    { id: 'marathi', label: 'मराठी (Marathi)' },
+    { id: 'telugu', label: 'తెలుగు (Telugu)' },
+    { id: 'tamil', label: 'தமிழ் (Tamil)' },
+    { id: 'gujarati', label: 'ગુજરાતી (Gujarati)' },
+    { id: 'kannada', label: 'ಕನ್ನಡ (Kannada)' },
+    { id: 'malayalam', label: 'മലയാളം (Malayalam)' },
+    { id: 'urdu', label: 'اردو (Urdu)' },
+    { id: 'punjabi', label: 'ਪੰਜਾਬੀ (Punjabi)' },
+    { id: 'odia', label: 'ଓଡ଼ିଆ (Odia)' },
+    { id: 'assamese', label: 'অসমীয়া (Assamese)' }
   ];
 
   const avatarStyles = [

@@ -269,6 +269,24 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
 
       await firebaseService.saveAssessmentResult(assessmentResult);
       
+      // --- NEW: Log this activity ---
+      try {
+        await firebaseService.logUserActivity(
+          currentUser.uid,
+          'completed_assessment',
+          { 
+            assessmentType,
+            totalScore: scores.totalScore,
+            severity: scores.severity,
+            previousScore: previousScore,
+            trend: assessmentResult.comparedToPrevious?.trend || 'first_time'
+          }
+        );
+      } catch (activityError) {
+        console.warn('Failed to log assessment activity:', activityError);
+      }
+      // --- END NEW ---
+      
       toast.success('Assessment completed successfully! / मूल्यांकन सफलतापूर्वक पूरा हुआ!');
       onComplete(assessmentResult);
       

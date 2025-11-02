@@ -43,7 +43,7 @@ export function HomePage({ navigateTo }: HomePageProps = {}) {
   const onNav = (screen: string) => (navigateTo ? navigateTo(screen as any) : go(screen));
 
   return (
-    <div className="relative min-h-screen p-6">
+    <div className="relative p-6">
       <VantaBackground variant="local" />
       {/* Stats button in top-right */}
       <div className="absolute top-6 right-6">
@@ -59,71 +59,71 @@ export function HomePage({ navigateTo }: HomePageProps = {}) {
       </div>
 
       {/* Central content */}
-      <div className="flex flex-col items-center justify-center min-h-screen max-w-lg mx-auto px-6">
+      <div className="flex flex-col items-center pt-12 md:pt-24 max-w-lg mx-auto px-4 md:px-6">
         {/* App name and central meditation icon */}
-        <div className="text-center mb-16 w-full">
-          <h1 className="app-title text-5xl mb-8 text-foreground">MannMitra</h1>
-          <div className="w-full max-w-sm mx-auto mb-10 logo-container">
+        <div className="text-center mb-8 md:mb-16 w-full">
+          <h1 className="app-title text-3xl md:text-5xl mb-4 md:mb-8 text-foreground">MannMitra</h1>
+          <div className="w-full max-w-xs md:max-w-sm mx-auto mb-6 md:mb-10 logo-container">
             <img
               src={meditationIcon}
               alt="MannMitra Logo"
-              className="w-full h-80 object-contain logo-image"
+              className="w-full h-48 md:h-80 object-contain logo-image"
             />
           </div>
-          <h2 className="text-3xl mb-4 text-foreground">Welcome back</h2>
-          <p className="text-muted-foreground text-lg">How are you feeling today?</p>
+          <h2 className="text-xl md:text-3xl mb-2 md:mb-4 text-foreground">Welcome back</h2>
+          <p className="text-muted-foreground text-base md:text-lg">How are you feeling today?</p>
         </div>
 
         {/* Action buttons - positioned below the central element */}
-        <div className="w-full space-y-4 max-w-sm">
-          <Card className="p-6 hover:shadow-md transition-shadow cursor-pointer bg-card border-primary/20"
+        <div className="w-full space-y-3 md:space-y-4 max-w-sm">
+          <Card className="p-4 md:p-6 hover:shadow-md transition-shadow cursor-pointer bg-card border-primary/20"
             onClick={() => onNav('quiz')}>
-            <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-primary/20 rounded-lg flex items-center justify-center">
-                <Activity className="w-6 h-6 text-primary" />
+            <div className="flex items-center space-x-3 md:space-x-4">
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-primary/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Activity className="w-5 h-5 md:w-6 md:h-6 text-primary" />
               </div>
-              <div className="flex-1">
-                <h3 className="font-medium">Get Started Quiz</h3>
-                <p className="text-sm text-muted-foreground">Quick wellness check-in</p>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-medium text-sm md:text-base">Get Started Quiz</h3>
+                <p className="text-xs md:text-sm text-muted-foreground">Quick wellness check-in</p>
               </div>
             </div>
           </Card>
 
-          <Card className="p-6 hover:shadow-md transition-shadow cursor-pointer bg-card border-primary/20"
+          <Card className="p-4 md:p-6 hover:shadow-md transition-shadow cursor-pointer bg-card border-primary/20"
             onClick={() => onNav('calm-down')}>
-            <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-secondary/50 rounded-lg flex items-center justify-center">
-                <MessageCircle className="w-6 h-6 text-primary" />
+            <div className="flex items-center space-x-3 md:space-x-4">
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-secondary/50 rounded-lg flex items-center justify-center flex-shrink-0">
+                <MessageCircle className="w-5 h-5 md:w-6 md:h-6 text-primary" />
               </div>
-              <div className="flex-1">
-                <h3 className="font-medium">Calm-Down Session</h3>
-                <p className="text-sm text-muted-foreground">5-minute guided breathing</p>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-medium text-sm md:text-base">Calm-Down Session</h3>
+                <p className="text-xs md:text-sm text-muted-foreground">5-minute guided breathing</p>
               </div>
             </div>
           </Card>
 
-          <Card className="p-6 hover:shadow-md transition-shadow cursor-pointer bg-card border-primary/20"
+          <Card className="p-4 md:p-6 hover:shadow-md transition-shadow cursor-pointer bg-card border-primary/20"
             onClick={() => onNav('ai-companion')}>
-            <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-accent/50 rounded-lg flex items-center justify-center">
-                <MessageCircle className="w-6 h-6 text-primary" />
+            <div className="flex items-center space-x-3 md:space-x-4">
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-accent/50 rounded-lg flex items-center justify-center flex-shrink-0">
+                <MessageCircle className="w-5 h-5 md:w-6 md:h-6 text-primary" />
               </div>
-              <div className="flex-1">
-                <h3 className="font-medium">AI मित्र / AI Companion</h3>
-                <p className="text-sm text-muted-foreground">आपका सहायक साथी / Your supportive friend</p>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-medium text-sm md:text-base">AI मित्र / AI Companion</h3>
+                <p className="text-xs md:text-sm text-muted-foreground">आपका सहायक साथी / Your supportive friend</p>
               </div>
             </div>
           </Card>
 
-          <Card className="p-6 hover:shadow-md transition-shadow cursor-pointer bg-card border-primary/20"
+          <Card className="p-4 md:p-6 hover:shadow-md transition-shadow cursor-pointer bg-card border-primary/20"
             onClick={() => onNav('journal')}>
-            <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-accent/50 rounded-lg flex items-center justify-center">
-                <BookOpen className="w-6 h-6 text-primary" />
+            <div className="flex items-center space-x-3 md:space-x-4">
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-accent/50 rounded-lg flex items-center justify-center flex-shrink-0">
+                <BookOpen className="w-5 h-5 md:w-6 md:h-6 text-primary" />
               </div>
-              <div className="flex-1">
-                <h3 className="font-medium">Journal & Vent</h3>
-                <p className="text-sm text-muted-foreground">Express your thoughts</p>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-medium text-sm md:text-base">Journal & Vent</h3>
+                <p className="text-xs md:text-sm text-muted-foreground">Express your thoughts</p>
               </div>
             </div>
           </Card>
