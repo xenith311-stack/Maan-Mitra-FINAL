@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "mannmitra-mental-health",
+    "staging": "mannmitra-mental-health"
+  },
+  "targets": {},
+  "etags": {}
+}
