@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150" width="150" height="150">
+<!-- WhatsApp background pattern -->
+<rect width="150" height="150" fill="#EFEAE2"/>
+
+<!-- Subtle doodle pattern -->
+<g fill="none" stroke="#D1D7DB" stroke-width="0.8" opacity="0.4">
+  <!-- Simple geometric patterns -->
+  <circle cx="30" cy="30" r="2"/>
+  <circle cx="120" cy="40" r="1.5"/>
+  <circle cx="80" cy="80" r="2.5"/>
+  <circle cx="40" cy="120" r="1.8"/>
+  <circle cx="110" cy="110" r="2.2"/>
+  
+  <!-- Small dots scattered -->
+  <circle cx="60" cy="25" r="0.8"/>
+  <circle cx="90" cy="60" r="1"/>
+  <circle cx="25" cy="90" r="0.6"/>
+  <circle cx="130" cy="80" r="0.9"/>
+  <circle cx="70" cy="130" r="1.1"/>
+  
+  <!-- Tiny connecting lines -->
+  <path d="M30 30 L35 35"/>
+  <path d="M120 40 L115 45"/>
+  <path d="M80 80 L85 75"/>
+  <path d="M40 120 L45 115"/>
+  <path d="M110 110 L105 115"/>
+</g>
+</svg>
